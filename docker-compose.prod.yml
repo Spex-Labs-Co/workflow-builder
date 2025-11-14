@@ -3,7 +3,7 @@ services:
     image: ghcr.io/simstudioai/simstudio:latest
     restart: unless-stopped
     ports:
-      - '9000:3000'
+      - '9000:9000'
     deploy:
       resources:
         limits:
@@ -28,7 +28,7 @@ services:
       realtime:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '--quiet', 'http://127.0.0.1:3000']
+      test: ['CMD', 'wget', '--spider', '--quiet', 'http://127.0.0.1:9000']
       interval: 90s
       timeout: 5s
       retries: 3
@@ -38,7 +38,7 @@ services:
     image: ghcr.io/simstudioai/realtime:latest
     restart: unless-stopped
     ports:
-      - '9010:3002'
+      - '9010:9010'
     deploy:
       resources:
         limits:
@@ -52,7 +52,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '--spider', '--quiet', 'http://127.0.0.1:3002/health']
+      test: ['CMD', 'wget', '--spider', '--quiet', 'http://127.0.0.1:9010/health']
       interval: 90s
       timeout: 5s
       retries: 3
