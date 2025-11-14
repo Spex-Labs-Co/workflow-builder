@@ -3,7 +3,7 @@ services:
     image: ghcr.io/simstudioai/simstudio:latest
     restart: unless-stopped
     ports:
-      - '8080:3000'
+      - '9000:3000'
     deploy:
       resources:
         limits:
@@ -38,7 +38,7 @@ services:
     image: ghcr.io/simstudioai/realtime:latest
     restart: unless-stopped
     ports:
-      - '8082:3002'
+      - '9010:3002'
     deploy:
       resources:
         limits:
