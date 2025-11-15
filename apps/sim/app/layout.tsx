@@ -72,7 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     var state = parsed?.state;
                     var width = state?.sidebarWidth;
                     var maxSidebarWidth = window.innerWidth * 0.3;
-                    
+
                     // Cap stored width at 30% of viewport
                     if (width >= 232 && width <= maxSidebarWidth) {
                       document.documentElement.style.setProperty('--sidebar-width', width + 'px');
@@ -84,7 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 } catch (e) {
                   // Fallback handled by CSS defaults
                 }
-                
+
                 // Set panel width and active tab
                 try {
                   var panelStored = localStorage.getItem('panel-state');
@@ -93,7 +93,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     var panelState = panelParsed?.state;
                     var panelWidth = panelState?.panelWidth;
                     var maxPanelWidth = window.innerWidth * 0.4;
-                    
+
                     // Cap stored width at 40% of viewport
                     if (panelWidth >= 244 && panelWidth <= maxPanelWidth) {
                       document.documentElement.style.setProperty('--panel-width', panelWidth + 'px');
@@ -101,7 +101,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       // If stored width exceeds 40%, cap it
                       document.documentElement.style.setProperty('--panel-width', maxPanelWidth + 'px');
                     }
-                    
+
                     // Set active tab to prevent flash on hydration
                     var activeTab = panelState?.activeTab;
                     if (activeTab) {
@@ -111,7 +111,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 } catch (e) {
                   // Fallback handled by CSS defaults
                 }
-                
+
                 // Set toolbar triggers height
                 try {
                   var toolbarStored = localStorage.getItem('toolbar-state');
@@ -126,7 +126,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 } catch (e) {
                   // Fallback handled by CSS defaults
                 }
-                
+
                 // Set editor connections height
                 try {
                   var editorStored = localStorage.getItem('panel-editor-state');
@@ -141,7 +141,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 } catch (e) {
                   // Fallback handled by CSS defaults
                 }
-                
+
                 // Set terminal height
                 try {
                   var terminalStored = localStorage.getItem('terminal-state');
@@ -150,7 +150,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     var terminalState = terminalParsed?.state;
                     var terminalHeight = terminalState?.terminalHeight;
                     var maxTerminalHeight = window.innerHeight * 0.7;
-                    
+
                     // Cap stored height at 70% of viewport
                     if (terminalHeight >= 30 && terminalHeight <= maxTerminalHeight) {
                       document.documentElement.style.setProperty('--terminal-height', terminalHeight + 'px');
@@ -163,6 +163,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   // Fallback handled by CSS defaults
                 }
               })();
+            `,
+          }}
+        />
+
+        {/* Polyfill for crypto.randomUUID() in older browsers */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
+                crypto.randomUUID = function() {
+                  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                  });
+                };
+              }
             `,
           }}
         />

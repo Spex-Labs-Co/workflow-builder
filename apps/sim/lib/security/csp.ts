@@ -82,6 +82,11 @@ export const buildTimeCSPDirectives: CSPDirectives = {
     env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3002',
     env.NEXT_PUBLIC_SOCKET_URL?.replace('http://', 'ws://').replace('https://', 'wss://') ||
       'ws://localhost:3002',
+    // Allow connections to the server IP for WebSocket
+    'ws://37.27.0.125:3002',
+    'wss://37.27.0.125:3002',
+    'http://37.27.0.125:3002',
+    'https://37.27.0.125:3002',
     'https://api.browser-use.com',
     'https://api.exa.ai',
     'https://api.firecrawl.dev',
