@@ -80,8 +80,6 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-simstudio}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    labels:
-      - "coolify.reset=always"
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
