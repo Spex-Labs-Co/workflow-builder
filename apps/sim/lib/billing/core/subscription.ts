@@ -1,5 +1,6 @@
 import { db } from '@sim/db'
 import { member, subscription, user, userStats } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq, inArray } from 'drizzle-orm'
 import {
   checkEnterprisePlan,
@@ -9,9 +10,8 @@ import {
   getPerUserMinimumLimit,
 } from '@/lib/billing/subscriptions/utils'
 import type { UserSubscriptionState } from '@/lib/billing/types'
-import { isProd } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getBaseUrl } from '@/lib/urls/utils'
+import { isProd } from '@/lib/core/config/feature-flags'
+import { getBaseUrl } from '@/lib/core/utils/urls'
 
 const logger = createLogger('SubscriptionCore')
 
@@ -301,7 +301,7 @@ export async function sendPlanWelcomeEmail(subscription: any): Promise<void> {
         const { getEmailSubject, renderPlanWelcomeEmail } = await import(
           '@/components/emails/render-email'
         )
-        const { sendEmail } = await import('@/lib/email/mailer')
+        const { sendEmail } = await import('@/lib/messaging/email/mailer')
 
         const baseUrl = getBaseUrl()
         const html = await renderPlanWelcomeEmail({

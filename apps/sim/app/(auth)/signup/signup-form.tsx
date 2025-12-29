@@ -1,21 +1,21 @@
 'use client'
 
 import { Suspense, useEffect, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { ArrowRight, ChevronRight, Eye, EyeOff } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { client, useSession } from '@/lib/auth-client'
-import { quickValidateEmail } from '@/lib/email/validation'
-import { getEnv, isFalsy, isTruthy } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
-import { cn } from '@/lib/utils'
+import { client, useSession } from '@/lib/auth/auth-client'
+import { getEnv, isFalsy, isTruthy } from '@/lib/core/config/env'
+import { cn } from '@/lib/core/utils/cn'
+import { quickValidateEmail } from '@/lib/messaging/email/validation'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { soehne } from '@/app/_styles/fonts/soehne/soehne'
 import { SocialLoginButtons } from '@/app/(auth)/components/social-login-buttons'
 import { SSOLoginButton } from '@/app/(auth)/components/sso-login-button'
-import { inter } from '@/app/fonts/inter/inter'
-import { soehne } from '@/app/fonts/soehne/soehne'
 
 const logger = createLogger('SignupForm')
 
@@ -513,7 +513,7 @@ function SignupFormContent({
             disabled={isLoading}
           >
             <span className='flex items-center gap-1'>
-              {isLoading ? 'Creating account...' : 'Create account'}
+              {isLoading ? 'Creating account' : 'Create account'}
               <span className='inline-flex transition-transform duration-200 group-hover:translate-x-0.5'>
                 {isButtonHovered ? (
                   <ArrowRight className='h-4 w-4' aria-hidden='true' />

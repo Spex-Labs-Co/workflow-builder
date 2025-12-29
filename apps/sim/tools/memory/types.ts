@@ -15,7 +15,7 @@ export interface AgentMemoryData {
 export interface MemoryRecord {
   id: string
   key: string
-  type: 'agent'
+  conversationId: string
   data: AgentMemoryData[]
   createdAt: string
   updatedAt: string

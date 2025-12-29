@@ -1,15 +1,15 @@
 import { db } from '@sim/db'
 import { templates, webhook, workflow } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { authenticateApiKeyFromHeader, updateApiKeyLastUsed } from '@/lib/api-key/service'
 import { getSession } from '@/lib/auth'
 import { verifyInternalToken } from '@/lib/auth/internal'
-import { env } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
-import { generateRequestId } from '@/lib/utils'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/db-helpers'
+import { env } from '@/lib/core/config/env'
+import { generateRequestId } from '@/lib/core/utils/request'
+import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
 import { getWorkflowAccessContext, getWorkflowById } from '@/lib/workflows/utils'
 
 const logger = createLogger('WorkflowByIdAPI')
@@ -152,7 +152,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
       return NextResponse.json({ data: finalWorkflowData }, { status: 200 })
     }
-    return NextResponse.json({ error: 'Workflow has no normalized data' }, { status: 400 })
+
+    const emptyWorkflowData = {
+      ...workflowData,
+      state: {
+        deploymentStatuses: {},
+        blocks: {},
+        edges: [],
+        loops: {},
+        parallels: {},
+        lastSaved: Date.now(),
+        isDeployed: workflowData.isDeployed || false,
+        deployedAt: workflowData.deployedAt,
+      },
+      variables: workflowData.variables || {},
+    }
+
+    return NextResponse.json({ data: emptyWorkflowData }, { status: 200 })
   } catch (error: any) {
     const elapsed = Date.now() - startTime
     logger.error(`[${requestId}] Error fetching workflow ${workflowId} after ${elapsed}ms`, error)
@@ -212,6 +228,21 @@ export async function DELETE(
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
+    // Check if this is the last workflow in the workspace
+    if (workflowData.workspaceId) {
+      const totalWorkflowsInWorkspace = await db
+        .select({ id: workflow.id })
+        .from(workflow)
+        .where(eq(workflow.workspaceId, workflowData.workspaceId))
+
+      if (totalWorkflowsInWorkspace.length <= 1) {
+        return NextResponse.json(
+          { error: 'Cannot delete the only workflow in the workspace' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Check if workflow has published templates before deletion
     const { searchParams } = new URL(request.url)
     const checkTemplates = searchParams.get('check-templates') === 'true'
@@ -262,7 +293,7 @@ export async function DELETE(
 
     // Clean up external webhooks before deleting workflow
     try {
-      const { cleanupExternalWebhook } = await import('@/lib/webhooks/webhook-helpers')
+      const { cleanupExternalWebhook } = await import('@/lib/webhooks/provider-subscriptions')
       const webhooksToCleanup = await db
         .select({
           webhook: webhook,

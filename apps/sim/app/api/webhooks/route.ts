@@ -1,13 +1,13 @@
 import { db } from '@sim/db'
 import { webhook, workflow } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, desc, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { type NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getUserEntityPermissions } from '@/lib/permissions/utils'
-import { getBaseUrl } from '@/lib/urls/utils'
-import { generateRequestId } from '@/lib/utils'
+import { generateRequestId } from '@/lib/core/utils/request'
+import { getBaseUrl } from '@/lib/core/utils/urls'
+import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'
 import { getOAuthToken } from '@/app/api/auth/oauth/utils'
 
 const logger = createLogger('WebhooksAPI')
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
     const isCredentialBased = credentialBasedProviders.includes(provider)
     // Treat Microsoft Teams chat subscription as credential-based for path generation purposes
     const isMicrosoftTeamsChatSubscription =
-      provider === 'microsoftteams' &&
+      provider === 'microsoft-teams' &&
       typeof providerConfig === 'object' &&
       providerConfig?.triggerId === 'microsoftteams_chat_subscription'
 
@@ -297,8 +297,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (provider === 'microsoftteams') {
-      const { createTeamsSubscription } = await import('@/lib/webhooks/webhook-helpers')
+    if (provider === 'calendly') {
+      logger.info(`[${requestId}] Creating Calendly subscription before saving to database`)
+      try {
+        externalSubscriptionId = await createCalendlyWebhookSubscription(
+          request,
+          userId,
+          createTempWebhookData(),
+          requestId
+        )
+        if (externalSubscriptionId) {
+          resolvedProviderConfig.externalId = externalSubscriptionId
+          externalSubscriptionCreated = true
+        }
+      } catch (err) {
+        logger.error(`[${requestId}] Error creating Calendly webhook subscription`, err)
+        return NextResponse.json(
+          {
+            error: 'Failed to create webhook in Calendly',
+            details: err instanceof Error ? err.message : 'Unknown error',
+          },
+          { status: 500 }
+        )
+      }
+    }
+
+    if (provider === 'microsoft-teams') {
+      const { createTeamsSubscription } = await import('@/lib/webhooks/provider-subscriptions')
       logger.info(`[${requestId}] Creating Teams subscription before saving to database`)
       try {
         await createTeamsSubscription(request, createTempWebhookData(), workflowRecord, requestId)
@@ -316,7 +341,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (provider === 'telegram') {
-      const { createTelegramWebhook } = await import('@/lib/webhooks/webhook-helpers')
+      const { createTelegramWebhook } = await import('@/lib/webhooks/provider-subscriptions')
       logger.info(`[${requestId}] Creating Telegram webhook before saving to database`)
       try {
         await createTelegramWebhook(request, createTempWebhookData(), requestId)
@@ -359,7 +384,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (provider === 'typeform') {
-      const { createTypeformWebhook } = await import('@/lib/webhooks/webhook-helpers')
+      const { createTypeformWebhook } = await import('@/lib/webhooks/provider-subscriptions')
       logger.info(`[${requestId}] Creating Typeform webhook before saving to database`)
       try {
         const usedTag = await createTypeformWebhook(request, createTempWebhookData(), requestId)
@@ -431,7 +456,7 @@ export async function POST(request: NextRequest) {
       if (externalSubscriptionCreated) {
         logger.error(`[${requestId}] DB save failed, cleaning up external subscription`, dbError)
         try {
-          const { cleanupExternalWebhook } = await import('@/lib/webhooks/webhook-helpers')
+          const { cleanupExternalWebhook } = await import('@/lib/webhooks/provider-subscriptions')
           await cleanupExternalWebhook(createTempWebhookData(), workflowRecord, requestId)
         } catch (cleanupError) {
           logger.error(
@@ -518,6 +543,43 @@ export async function POST(request: NextRequest) {
       }
     }
     // --- End Outlook specific logic ---
+
+    // --- RSS webhook setup ---
+    if (savedWebhook && provider === 'rss') {
+      logger.info(`[${requestId}] RSS provider detected. Setting up RSS webhook configuration.`)
+      try {
+        const { configureRssPolling } = await import('@/lib/webhooks/utils.server')
+        const success = await configureRssPolling(savedWebhook, requestId)
+
+        if (!success) {
+          logger.error(`[${requestId}] Failed to configure RSS polling, rolling back webhook`)
+          await db.delete(webhook).where(eq(webhook.id, savedWebhook.id))
+          return NextResponse.json(
+            {
+              error: 'Failed to configure RSS polling',
+              details: 'Please try again',
+            },
+            { status: 500 }
+          )
+        }
+
+        logger.info(`[${requestId}] Successfully configured RSS polling`)
+      } catch (err) {
+        logger.error(
+          `[${requestId}] Error setting up RSS webhook configuration, rolling back webhook`,
+          err
+        )
+        await db.delete(webhook).where(eq(webhook.id, savedWebhook.id))
+        return NextResponse.json(
+          {
+            error: 'Failed to configure RSS webhook',
+            details: err instanceof Error ? err.message : 'Unknown error',
+          },
+          { status: 500 }
+        )
+      }
+    }
+    // --- End RSS specific logic ---
 
     const status = targetWebhookId ? 200 : 201
     return NextResponse.json({ webhook: savedWebhook }, { status })
@@ -635,6 +697,140 @@ async function createAirtableWebhookSubscription(
     throw error
   }
 }
+
+// Helper function to create the webhook subscription in Calendly
+async function createCalendlyWebhookSubscription(
+  request: NextRequest,
+  userId: string,
+  webhookData: any,
+  requestId: string
+): Promise<string | undefined> {
+  try {
+    const { path, providerConfig } = webhookData
+    const { apiKey, organization, triggerId } = providerConfig || {}
+
+    if (!apiKey) {
+      logger.warn(`[${requestId}] Missing apiKey for Calendly webhook creation.`, {
+        webhookId: webhookData.id,
+      })
+      throw new Error(
+        'Personal Access Token is required to create Calendly webhook. Please provide your Calendly Personal Access Token.'
+      )
+    }
+
+    if (!organization) {
+      logger.warn(`[${requestId}] Missing organization URI for Calendly webhook creation.`, {
+        webhookId: webhookData.id,
+      })
+      throw new Error(
+        'Organization URI is required to create Calendly webhook. Please provide your Organization URI from the "Get Current User" operation.'
+      )
+    }
+
+    if (!triggerId) {
+      logger.warn(`[${requestId}] Missing triggerId for Calendly webhook creation.`, {
+        webhookId: webhookData.id,
+      })
+      throw new Error('Trigger ID is required to create Calendly webhook')
+    }
+
+    const notificationUrl = `${getBaseUrl()}/api/webhooks/trigger/${path}`
+
+    // Map trigger IDs to Calendly event types
+    const eventTypeMap: Record<string, string[]> = {
+      calendly_invitee_created: ['invitee.created'],
+      calendly_invitee_canceled: ['invitee.canceled'],
+      calendly_routing_form_submitted: ['routing_form_submission.created'],
+      calendly_webhook: ['invitee.created', 'invitee.canceled', 'routing_form_submission.created'],
+    }
+
+    const events = eventTypeMap[triggerId] || ['invitee.created']
+
+    const calendlyApiUrl = 'https://api.calendly.com/webhook_subscriptions'
+
+    const requestBody = {
+      url: notificationUrl,
+      events,
+      organization,
+      scope: 'organization',
+    }
+
+    const calendlyResponse = await fetch(calendlyApiUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    if (!calendlyResponse.ok) {
+      const errorBody = await calendlyResponse.json().catch(() => ({}))
+      const errorMessage = errorBody.message || errorBody.title || 'Unknown Calendly API error'
+      logger.error(
+        `[${requestId}] Failed to create webhook in Calendly for webhook ${webhookData.id}. Status: ${calendlyResponse.status}`,
+        { response: errorBody }
+      )
+
+      let userFriendlyMessage = 'Failed to create webhook subscription in Calendly'
+      if (calendlyResponse.status === 401) {
+        userFriendlyMessage =
+          'Calendly authentication failed. Please verify your Personal Access Token is correct.'
+      } else if (calendlyResponse.status === 403) {
+        userFriendlyMessage =
+          'Calendly access denied. Please ensure you have appropriate permissions and a paid Calendly subscription.'
+      } else if (calendlyResponse.status === 404) {
+        userFriendlyMessage =
+          'Calendly organization not found. Please verify the Organization URI is correct.'
+      } else if (errorMessage && errorMessage !== 'Unknown Calendly API error') {
+        userFriendlyMessage = `Calendly error: ${errorMessage}`
+      }
+
+      throw new Error(userFriendlyMessage)
+    }
+
+    const responseBody = await calendlyResponse.json()
+    const webhookUri = responseBody.resource?.uri
+
+    if (!webhookUri) {
+      logger.error(
+        `[${requestId}] Calendly webhook created but no webhook URI returned for webhook ${webhookData.id}`,
+        { response: responseBody }
+      )
+      throw new Error('Calendly webhook creation succeeded but no webhook URI was returned')
+    }
+
+    // Extract the webhook ID from the URI (e.g., https://api.calendly.com/webhook_subscriptions/WEBHOOK_ID)
+    const webhookId = webhookUri.split('/').pop()
+
+    if (!webhookId) {
+      logger.error(`[${requestId}] Could not extract webhook ID from Calendly URI: ${webhookUri}`, {
+        response: responseBody,
+      })
+      throw new Error('Failed to extract webhook ID from Calendly response')
+    }
+
+    logger.info(
+      `[${requestId}] Successfully created webhook in Calendly for webhook ${webhookData.id}.`,
+      {
+        calendlyWebhookUri: webhookUri,
+        calendlyWebhookId: webhookId,
+      }
+    )
+    return webhookId
+  } catch (error: any) {
+    logger.error(
+      `[${requestId}] Exception during Calendly webhook creation for webhook ${webhookData.id}.`,
+      {
+        message: error.message,
+        stack: error.stack,
+      }
+    )
+    // Re-throw the error so it can be caught by the outer try-catch
+    throw error
+  }
+}
+
 // Helper function to create the webhook subscription in Webflow
 async function createWebflowWebhookSubscription(
   request: NextRequest,

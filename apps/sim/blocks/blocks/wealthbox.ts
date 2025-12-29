@@ -33,7 +33,6 @@ export const WealthboxBlock: BlockConfig<WealthboxResponse> = {
       id: 'credential',
       title: 'Wealthbox Account',
       type: 'oauth-input',
-      provider: 'wealthbox',
       serviceId: 'wealthbox',
       requiredScopes: ['login', 'data'],
       placeholder: 'Select Wealthbox account',
@@ -50,7 +49,6 @@ export const WealthboxBlock: BlockConfig<WealthboxResponse> = {
       id: 'contactId',
       title: 'Select Contact',
       type: 'file-selector',
-      provider: 'wealthbox',
       serviceId: 'wealthbox',
       requiredScopes: ['login', 'data'],
       placeholder: 'Enter Contact ID',
@@ -72,17 +70,6 @@ export const WealthboxBlock: BlockConfig<WealthboxResponse> = {
       title: 'Task ID',
       type: 'short-input',
       placeholder: 'Enter Task ID',
-      mode: 'basic',
-      canonicalParamId: 'taskId',
-      condition: { field: 'operation', value: ['read_task'] },
-    },
-    {
-      id: 'manualTaskId',
-      title: 'Task ID',
-      type: 'short-input',
-      canonicalParamId: 'taskId',
-      placeholder: 'Enter Task ID',
-      mode: 'advanced',
       condition: { field: 'operation', value: ['read_task'] },
     },
     {
@@ -169,12 +156,9 @@ export const WealthboxBlock: BlockConfig<WealthboxResponse> = {
         }
       },
       params: (params) => {
-        const { credential, operation, contactId, manualContactId, taskId, manualTaskId, ...rest } =
-          params
+        const { credential, operation, contactId, manualContactId, taskId, ...rest } = params
 
-        // Handle both selector and manual inputs
         const effectiveContactId = (contactId || manualContactId || '').trim()
-        const effectiveTaskId = (taskId || manualTaskId || '').trim()
 
         const baseParams = {
           ...rest,
@@ -227,7 +211,6 @@ export const WealthboxBlock: BlockConfig<WealthboxResponse> = {
     contactId: { type: 'string', description: 'Contact identifier' },
     manualContactId: { type: 'string', description: 'Manual contact identifier' },
     taskId: { type: 'string', description: 'Task identifier' },
-    manualTaskId: { type: 'string', description: 'Manual task identifier' },
     content: { type: 'string', description: 'Content text' },
     firstName: { type: 'string', description: 'First name' },
     lastName: { type: 'string', description: 'Last name' },

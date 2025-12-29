@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import Image from 'next/image'
 import type { MDXRemoteProps } from 'next-mdx-remote/rsc'
-import { CodeBlock } from './code'
+import { CodeBlock } from '@/lib/blog/code'
 
 export const mdxComponents: MDXRemoteProps['components'] = {
   img: (props: any) => (
@@ -11,6 +11,9 @@ export const mdxComponents: MDXRemoteProps['components'] = {
       width={props.width ? Number(props.width) : 800}
       height={props.height ? Number(props.height) : 450}
       className={clsx('h-auto w-full rounded-lg', props.className)}
+      sizes='(max-width: 768px) 100vw, 800px'
+      loading='lazy'
+      unoptimized
     />
   ),
   h2: (props: any) => (
@@ -64,7 +67,7 @@ export const mdxComponents: MDXRemoteProps['components'] = {
   a: (props: any) => {
     const isAnchorLink = props.className?.includes('anchor')
     if (isAnchorLink) {
-      return <a {...props} />
+      return <a {...props} className={clsx('text-inherit no-underline', props.className)} />
     }
     return (
       <a
@@ -110,7 +113,7 @@ export const mdxComponents: MDXRemoteProps['components'] = {
       const mappedLanguage = languageMap[language.toLowerCase()] || 'javascript'
 
       return (
-        <div className='my-6'>
+        <div className='not-prose my-6'>
           <CodeBlock
             code={typeof codeContent === 'string' ? codeContent.trim() : String(codeContent)}
             language={mappedLanguage}
@@ -126,9 +129,10 @@ export const mdxComponents: MDXRemoteProps['components'] = {
         <code
           {...props}
           className={clsx(
-            'rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[0.9em] text-red-600',
+            'rounded bg-gray-100 px-1.5 py-0.5 font-mono font-normal text-[0.9em] text-red-600',
             props.className
           )}
+          style={{ fontWeight: 400 }}
         />
       )
     }

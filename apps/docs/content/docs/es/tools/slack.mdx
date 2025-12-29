@@ -54,7 +54,7 @@ Integra Slack en el flujo de trabajo. Puede enviar, actualizar y eliminar mensaj
 
 ### `slack_message`
 
-Envía mensajes a canales o usuarios de Slack a través de la API de Slack. Compatible con el formato mrkdwn de Slack.
+Envía mensajes a canales de Slack o mensajes directos. Compatible con el formato mrkdwn de Slack.
 
 #### Entrada
 
@@ -62,17 +62,20 @@ Envía mensajes a canales o usuarios de Slack a través de la API de Slack. Comp
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | No | Método de autenticación: oauth o bot_token |
 | `botToken` | string | No | Token del bot para Bot personalizado |
-| `channel` | string | Sí | Canal de Slack objetivo (p. ej., #general) |
+| `channel` | string | No | Canal de Slack objetivo (p. ej., #general) |
+| `userId` | string | No | ID de usuario de Slack objetivo para mensajes directos (p. ej., U1234567890) |
 | `text` | string | Sí | Texto del mensaje a enviar (admite formato mrkdwn de Slack) |
-| `thread_ts` | string | No | Marca de tiempo del hilo para responder (crea respuesta en hilo) |
+| `thread_ts` | string | No | Marca de tiempo del hilo al que responder (crea respuesta en hilo) |
 | `files` | file[] | No | Archivos para adjuntar al mensaje |
 
 #### Salida
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
+| `message` | object | Objeto de mensaje completo con todas las propiedades devueltas por Slack |
 | `ts` | string | Marca de tiempo del mensaje |
 | `channel` | string | ID del canal donde se envió el mensaje |
+| `fileCount` | number | Número de archivos subidos (cuando se adjuntan archivos) |
 
 ### `slack_canvas`
 
@@ -107,8 +110,9 @@ Lee los últimos mensajes de los canales de Slack. Recupera el historial de conv
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | No | Método de autenticación: oauth o bot_token |
 | `botToken` | string | No | Token del bot para Bot personalizado |
-| `channel` | string | Sí | Canal de Slack del que leer mensajes (p. ej., #general) |
-| `limit` | number | No | Número de mensajes a recuperar (predeterminado: 10, máx: 100) |
+| `channel` | string | No | Canal de Slack del que leer mensajes (p. ej., #general) |
+| `userId` | string | No | ID de usuario para conversación de mensaje directo (p. ej., U1234567890) |
+| `limit` | number | No | Número de mensajes a recuperar (predeterminado: 10, máx: 15) |
 | `oldest` | string | No | Inicio del rango de tiempo (marca de tiempo) |
 | `latest` | string | No | Fin del rango de tiempo (marca de tiempo) |
 
@@ -117,6 +121,82 @@ Lee los últimos mensajes de los canales de Slack. Recupera el historial de conv
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
 | `messages` | array | Array de objetos de mensaje del canal |
+
+### `slack_list_channels`
+
+Lista todos los canales en un espacio de trabajo de Slack. Devuelve los canales públicos y privados a los que el bot tiene acceso.
+
+#### Entrada
+
+| Parámetro | Tipo | Obligatorio | Descripción |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | No | Método de autenticación: oauth o bot_token |
+| `botToken` | string | No | Token del bot para Bot personalizado |
+| `includePrivate` | boolean | No | Incluir canales privados de los que el bot es miembro (predeterminado: true) |
+| `excludeArchived` | boolean | No | Excluir canales archivados (predeterminado: true) |
+| `limit` | number | No | Número máximo de canales a devolver (predeterminado: 100, máx: 200) |
+
+#### Salida
+
+| Parámetro | Tipo | Descripción |
+| --------- | ---- | ----------- |
+| `channels` | array | Array de objetos de canal del espacio de trabajo |
+
+### `slack_list_members`
+
+Lista todos los miembros (IDs de usuario) en un canal de Slack. Úsalo con Obtener Información de Usuario para resolver IDs a nombres.
+
+#### Entrada
+
+| Parámetro | Tipo | Obligatorio | Descripción |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | No | Método de autenticación: oauth o bot_token |
+| `botToken` | string | No | Token del bot para Bot personalizado |
+| `channel` | string | Sí | ID del canal del que listar miembros |
+| `limit` | number | No | Número máximo de miembros a devolver (predeterminado: 100, máx: 200) |
+
+#### Salida
+
+| Parámetro | Tipo | Descripción |
+| --------- | ---- | ----------- |
+| `members` | array | Array de IDs de usuario que son miembros del canal (p. ej., U1234567890) |
+
+### `slack_list_users`
+
+Lista todos los usuarios en un espacio de trabajo de Slack. Devuelve perfiles de usuario con nombres y avatares.
+
+#### Entrada
+
+| Parámetro | Tipo | Obligatorio | Descripción |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | No | Método de autenticación: oauth o bot_token |
+| `botToken` | string | No | Token del bot para Bot personalizado |
+| `includeDeleted` | boolean | No | Incluir usuarios desactivados/eliminados \(predeterminado: false\) |
+| `limit` | number | No | Número máximo de usuarios a devolver \(predeterminado: 100, máx: 200\) |
+
+#### Salida
+
+| Parámetro | Tipo | Descripción |
+| --------- | ---- | ----------- |
+| `users` | array | Array de objetos de usuario del espacio de trabajo |
+
+### `slack_get_user`
+
+Obtiene información detallada sobre un usuario específico de Slack mediante su ID de usuario.
+
+#### Entrada
+
+| Parámetro | Tipo | Obligatorio | Descripción |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | No | Método de autenticación: oauth o bot_token |
+| `botToken` | string | No | Token del bot para Bot personalizado |
+| `userId` | string | Sí | ID de usuario a buscar \(p. ej., U1234567890\) |
+
+#### Salida
+
+| Parámetro | Tipo | Descripción |
+| --------- | ---- | ----------- |
+| `user` | object | Información detallada del usuario |
 
 ### `slack_download`
 
@@ -155,6 +235,7 @@ Actualizar un mensaje enviado previamente por el bot en Slack
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
+| `message` | object | Objeto de mensaje actualizado completo con todas las propiedades devueltas por Slack |
 | `content` | string | Mensaje de éxito |
 | `metadata` | object | Metadatos del mensaje actualizado |
 
@@ -180,7 +261,7 @@ Eliminar un mensaje enviado previamente por el bot en Slack
 
 ### `slack_add_reaction`
 
-Añadir una reacción con emoji a un mensaje de Slack
+Añadir una reacción emoji a un mensaje de Slack
 
 #### Entrada
 

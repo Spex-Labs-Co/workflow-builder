@@ -1,10 +1,10 @@
 import { db } from '@sim/db'
-import { permissions, workflow, workflowExecutionLogs } from '@sim/db/schema'
-import { and, eq, gte, inArray, lte } from 'drizzle-orm'
+import { pausedExecutions, permissions, workflow, workflowExecutionLogs } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
+import { and, eq, gte, inArray, isNotNull, isNull, lte, or, type SQL, sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
 
 const logger = createLogger('MetricsExecutionsAPI')
 
@@ -15,6 +15,11 @@ const QueryParamsSchema = z.object({
   workflowIds: z.string().optional(),
   folderIds: z.string().optional(),
   triggers: z.string().optional(),
+  level: z.string().optional(), // Supports comma-separated values: 'error,running'
+  allTime: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
 })
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,17 +33,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     const userId = session.user.id
 
-    const end = qp.endTime ? new Date(qp.endTime) : new Date()
-    const start = qp.startTime
+    let end = qp.endTime ? new Date(qp.endTime) : new Date()
+    let start = qp.startTime
       ? new Date(qp.startTime)
       : new Date(end.getTime() - 24 * 60 * 60 * 1000)
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+
+    const isAllTime = qp.allTime === true
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       return NextResponse.json({ error: 'Invalid time range' }, { status: 400 })
     }
 
     const segments = qp.segments
-    const totalMs = Math.max(1, end.getTime() - start.getTime())
-    const segmentMs = Math.max(1, Math.floor(totalMs / Math.max(1, segments)))
 
     const [permission] = await db
       .select()
@@ -74,30 +80,120 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         workflows: [],
         startTime: start.toISOString(),
         endTime: end.toISOString(),
-        segmentMs,
+        segmentMs: 0,
       })
     }
 
     const workflowIdList = workflows.map((w) => w.id)
 
-    const logWhere = [
-      inArray(workflowExecutionLogs.workflowId, workflowIdList),
-      gte(workflowExecutionLogs.startedAt, start),
-      lte(workflowExecutionLogs.startedAt, end),
-    ] as any[]
+    const baseLogWhere = [inArray(workflowExecutionLogs.workflowId, workflowIdList)] as SQL[]
     if (qp.triggers) {
       const t = qp.triggers.split(',').filter(Boolean)
-      logWhere.push(inArray(workflowExecutionLogs.trigger, t))
+      baseLogWhere.push(inArray(workflowExecutionLogs.trigger, t))
     }
+
+    if (qp.level && qp.level !== 'all') {
+      const levels = qp.level.split(',').filter(Boolean)
+      const levelConditions: SQL[] = []
+
+      for (const level of levels) {
+        if (level === 'error') {
+          levelConditions.push(eq(workflowExecutionLogs.level, 'error'))
+        } else if (level === 'info') {
+          const condition = and(
+            eq(workflowExecutionLogs.level, 'info'),
+            isNotNull(workflowExecutionLogs.endedAt)
+          )
+          if (condition) levelConditions.push(condition)
+        } else if (level === 'running') {
+          const condition = and(
+            eq(workflowExecutionLogs.level, 'info'),
+            isNull(workflowExecutionLogs.endedAt)
+          )
+          if (condition) levelConditions.push(condition)
+        } else if (level === 'pending') {
+          const condition = and(
+            eq(workflowExecutionLogs.level, 'info'),
+            or(
+              sql`(${pausedExecutions.totalPauseCount} > 0 AND ${pausedExecutions.resumedCount} < ${pausedExecutions.totalPauseCount})`,
+              and(
+                isNotNull(pausedExecutions.status),
+                sql`${pausedExecutions.status} != 'fully_resumed'`
+              )
+            )
+          )
+          if (condition) levelConditions.push(condition)
+        }
+      }
+
+      if (levelConditions.length > 0) {
+        const combinedCondition =
+          levelConditions.length === 1 ? levelConditions[0] : or(...levelConditions)
+        if (combinedCondition) baseLogWhere.push(combinedCondition)
+      }
+    }
+
+    if (isAllTime) {
+      const boundsQuery = db
+        .select({
+          minDate: sql<Date>`MIN(${workflowExecutionLogs.startedAt})`,
+          maxDate: sql<Date>`MAX(${workflowExecutionLogs.startedAt})`,
+        })
+        .from(workflowExecutionLogs)
+        .leftJoin(
+          pausedExecutions,
+          eq(pausedExecutions.executionId, workflowExecutionLogs.executionId)
+        )
+        .where(and(...baseLogWhere))
+
+      const [bounds] = await boundsQuery
+
+      if (bounds?.minDate && bounds?.maxDate) {
+        start = new Date(bounds.minDate)
+        end = new Date(Math.max(new Date(bounds.maxDate).getTime(), Date.now()))
+      } else {
+        return NextResponse.json({
+          workflows: workflows.map((wf) => ({
+            workflowId: wf.id,
+            workflowName: wf.name,
+            segments: [],
+          })),
+          startTime: new Date().toISOString(),
+          endTime: new Date().toISOString(),
+          segmentMs: 0,
+        })
+      }
+    }
+
+    if (start >= end) {
+      return NextResponse.json({ error: 'Invalid time range' }, { status: 400 })
+    }
+
+    const totalMs = Math.max(1, end.getTime() - start.getTime())
+    const segmentMs = Math.max(1, Math.floor(totalMs / Math.max(1, segments)))
+
+    const logWhere = [
+      ...baseLogWhere,
+      gte(workflowExecutionLogs.startedAt, start),
+      lte(workflowExecutionLogs.startedAt, end),
+    ]
 
     const logs = await db
       .select({
         workflowId: workflowExecutionLogs.workflowId,
         level: workflowExecutionLogs.level,
         startedAt: workflowExecutionLogs.startedAt,
+        endedAt: workflowExecutionLogs.endedAt,
         totalDurationMs: workflowExecutionLogs.totalDurationMs,
+        pausedTotalPauseCount: pausedExecutions.totalPauseCount,
+        pausedResumedCount: pausedExecutions.resumedCount,
+        pausedStatus: pausedExecutions.status,
       })
       .from(workflowExecutionLogs)
+      .leftJoin(
+        pausedExecutions,
+        eq(pausedExecutions.executionId, workflowExecutionLogs.executionId)
+      )
       .where(and(...logWhere))
 
     type Bucket = {

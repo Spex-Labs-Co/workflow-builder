@@ -1,5 +1,6 @@
-import { createLogger } from '@/lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
 import { getBlock } from '@/blocks/index'
+import { isMcpTool } from '@/executor/constants'
 import type { BlockHandler, ExecutionContext } from '@/executor/types'
 import type { SerializedBlock } from '@/serializer/types'
 import { executeTool } from '@/tools'
@@ -17,10 +18,10 @@ export class GenericBlockHandler implements BlockHandler {
     block: SerializedBlock,
     inputs: Record<string, any>
   ): Promise<any> {
-    const isMcpTool = block.config.tool?.startsWith('mcp-')
+    const isMcp = block.config.tool ? isMcpTool(block.config.tool) : false
     let tool = null
 
-    if (!isMcpTool) {
+    if (!isMcp) {
       tool = getTool(block.config.tool)
       if (!tool) {
         throw new Error(`Tool not found: ${block.config.tool}`)
@@ -40,6 +41,24 @@ export class GenericBlockHandler implements BlockHandler {
           logger.warn(`Failed to apply parameter transformation for block type ${blockType}:`, {
             error: error instanceof Error ? error.message : String(error),
           })
+        }
+      }
+
+      if (blockConfig?.inputs) {
+        for (const [key, inputSchema] of Object.entries(blockConfig.inputs)) {
+          const value = finalInputs[key]
+          if (typeof value === 'string' && value.trim().length > 0) {
+            const inputType = typeof inputSchema === 'object' ? inputSchema.type : inputSchema
+            if (inputType === 'json' || inputType === 'array') {
+              try {
+                finalInputs[key] = JSON.parse(value.trim())
+              } catch (error) {
+                logger.warn(`Failed to parse ${inputType} field "${key}":`, {
+                  error: error instanceof Error ? error.message : String(error),
+                })
+              }
+            }
+          }
         }
       }
     }
@@ -86,7 +105,7 @@ export class GenericBlockHandler implements BlockHandler {
       const output = result.output
       let cost = null
 
-      if (block.config.tool?.startsWith('knowledge_') && output?.cost) {
+      if (output?.cost) {
         cost = output.cost
       }
 

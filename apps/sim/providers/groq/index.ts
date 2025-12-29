@@ -1,6 +1,8 @@
+import { createLogger } from '@sim/logger'
 import { Groq } from 'groq-sdk'
-import { createLogger } from '@/lib/logs/console/logger'
 import type { StreamingExecution } from '@/executor/types'
+import { MAX_TOOL_ITERATIONS } from '@/providers'
+import { createReadableStreamFromGroqStream } from '@/providers/groq/utils'
 import { getProviderDefaultModel, getProviderModels } from '@/providers/models'
 import type {
   ProviderConfig,
@@ -8,31 +10,15 @@ import type {
   ProviderResponse,
   TimeSegment,
 } from '@/providers/types'
-import { prepareToolExecution } from '@/providers/utils'
+import {
+  calculateCost,
+  prepareToolExecution,
+  prepareToolsWithUsageControl,
+  trackForcedToolUsage,
+} from '@/providers/utils'
 import { executeTool } from '@/tools'
 
 const logger = createLogger('GroqProvider')
-
-/**
- * Helper to wrap Groq streaming into a browser-friendly ReadableStream
- * of raw assistant text chunks.
- */
-function createReadableStreamFromGroqStream(groqStream: any): ReadableStream {
-  return new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const chunk of groqStream) {
-          if (chunk.choices[0]?.delta?.content) {
-            controller.enqueue(new TextEncoder().encode(chunk.choices[0].delta.content))
-          }
-        }
-        controller.close()
-      } catch (err) {
-        controller.error(err)
-      }
-    },
-  })
-}
 
 export const groqProvider: ProviderConfig = {
   id: 'groq',
@@ -49,13 +35,10 @@ export const groqProvider: ProviderConfig = {
       throw new Error('API key is required for Groq')
     }
 
-    // Create Groq client
     const groq = new Groq({ apiKey: request.apiKey })
 
-    // Start with an empty array for all messages
     const allMessages = []
 
-    // Add system prompt if present
     if (request.systemPrompt) {
       allMessages.push({
         role: 'system',
@@ -63,7 +46,6 @@ export const groqProvider: ProviderConfig = {
       })
     }
 
-    // Add context if present
     if (request.context) {
       allMessages.push({
         role: 'user',
@@ -71,12 +53,10 @@ export const groqProvider: ProviderConfig = {
       })
     }
 
-    // Add remaining messages
     if (request.messages) {
       allMessages.push(...request.messages)
     }
 
-    // Transform tools to function format if provided
     const tools = request.tools?.length
       ? request.tools.map((tool) => ({
           type: 'function',
@@ -88,56 +68,52 @@ export const groqProvider: ProviderConfig = {
         }))
       : undefined
 
-    // Build the request payload
     const payload: any = {
-      model: (request.model || 'groq/meta-llama/llama-4-scout-17b-16e-instruct').replace(
-        'groq/',
-        ''
-      ),
+      model: request.model.replace('groq/', ''),
       messages: allMessages,
     }
 
-    // Add optional parameters
     if (request.temperature !== undefined) payload.temperature = request.temperature
     if (request.maxTokens !== undefined) payload.max_tokens = request.maxTokens
 
-    // Add response format for structured output if specified
     if (request.responseFormat) {
       payload.response_format = {
         type: 'json_schema',
-        schema: request.responseFormat.schema || request.responseFormat,
+        json_schema: {
+          name: request.responseFormat.name || 'response_schema',
+          schema: request.responseFormat.schema || request.responseFormat,
+          strict: request.responseFormat.strict !== false,
+        },
       }
     }
 
-    // Handle tools and tool usage control
-    if (tools?.length) {
-      // Filter out any tools with usageControl='none', but ignore 'force' since Groq doesn't support it
-      const filteredTools = tools.filter((tool) => {
-        const toolId = tool.function?.name
-        const toolConfig = request.tools?.find((t) => t.id === toolId)
-        // Only filter out 'none', treat 'force' as 'auto'
-        return toolConfig?.usageControl !== 'none'
-      })
+    let originalToolChoice: any
+    let forcedTools: string[] = []
+    let hasFilteredTools = false
 
-      if (filteredTools?.length) {
-        payload.tools = filteredTools
-        // Always use 'auto' for Groq, regardless of the tool_choice setting
-        payload.tool_choice = 'auto'
+    if (tools?.length) {
+      const preparedTools = prepareToolsWithUsageControl(tools, request.tools, logger, 'openai')
+
+      if (preparedTools.tools?.length) {
+        payload.tools = preparedTools.tools
+        payload.tool_choice = preparedTools.toolChoice || 'auto'
+        originalToolChoice = preparedTools.toolChoice
+        forcedTools = preparedTools.forcedTools || []
+        hasFilteredTools = preparedTools.hasFilteredTools
 
         logger.info('Groq request configuration:', {
-          toolCount: filteredTools.length,
-          toolChoice: 'auto', // Groq always uses auto
-          model: request.model || 'groq/meta-llama/llama-4-scout-17b-16e-instruct',
+          toolCount: preparedTools.tools.length,
+          toolChoice: payload.tool_choice,
+          forcedToolsCount: forcedTools.length,
+          hasFilteredTools,
+          model: request.model,
         })
       }
     }
 
-    // EARLY STREAMING: if caller requested streaming and there are no tools to execute,
-    // we can directly stream the completion.
     if (request.stream && (!tools || tools.length === 0)) {
       logger.info('Using streaming response for Groq request (no tools)')
 
-      // Start execution timer for the entire provider execution
       const providerStartTime = Date.now()
       const providerStartTimeISO = new Date(providerStartTime).toISOString()
 
@@ -146,22 +122,32 @@ export const groqProvider: ProviderConfig = {
         stream: true,
       })
 
-      // Start collecting token usage
-      const tokenUsage = {
-        prompt: 0,
-        completion: 0,
-        total: 0,
-      }
-
-      // Create a StreamingExecution response with a readable stream
       const streamingResult = {
-        stream: createReadableStreamFromGroqStream(streamResponse),
+        stream: createReadableStreamFromGroqStream(streamResponse as any, (content, usage) => {
+          streamingResult.execution.output.content = content
+          streamingResult.execution.output.tokens = {
+            input: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            total: usage.total_tokens,
+          }
+
+          const costResult = calculateCost(
+            request.model,
+            usage.prompt_tokens,
+            usage.completion_tokens
+          )
+          streamingResult.execution.output.cost = {
+            input: costResult.input,
+            output: costResult.output,
+            total: costResult.total,
+          }
+        }),
         execution: {
           success: true,
           output: {
-            content: '', // Will be filled by streaming content in chat component
-            model: request.model || 'groq/meta-llama/llama-4-scout-17b-16e-instruct',
-            tokens: tokenUsage,
+            content: '',
+            model: request.model,
+            tokens: { input: 0, output: 0, total: 0 },
             toolCalls: undefined,
             providerTiming: {
               startTime: providerStartTimeISO,
@@ -177,13 +163,9 @@ export const groqProvider: ProviderConfig = {
                 },
               ],
             },
-            cost: {
-              total: 0.0,
-              input: 0.0,
-              output: 0.0,
-            },
+            cost: { input: 0, output: 0, total: 0 },
           },
-          logs: [], // No block logs for direct streaming
+          logs: [],
           metadata: {
             startTime: providerStartTimeISO,
             endTime: new Date().toISOString(),
@@ -193,16 +175,13 @@ export const groqProvider: ProviderConfig = {
         },
       }
 
-      // Return the streaming execution object
       return streamingResult as StreamingExecution
     }
 
-    // Start execution timer for the entire provider execution
     const providerStartTime = Date.now()
     const providerStartTimeISO = new Date(providerStartTime).toISOString()
 
     try {
-      // Make the initial API request
       const initialCallTime = Date.now()
 
       let currentResponse = await groq.chat.completions.create(payload)
@@ -210,21 +189,17 @@ export const groqProvider: ProviderConfig = {
 
       let content = currentResponse.choices[0]?.message?.content || ''
       const tokens = {
-        prompt: currentResponse.usage?.prompt_tokens || 0,
-        completion: currentResponse.usage?.completion_tokens || 0,
+        input: currentResponse.usage?.prompt_tokens || 0,
+        output: currentResponse.usage?.completion_tokens || 0,
         total: currentResponse.usage?.total_tokens || 0,
       }
       const toolCalls = []
       const toolResults = []
       const currentMessages = [...allMessages]
       let iterationCount = 0
-      const MAX_ITERATIONS = 10 // Prevent infinite loops
-
-      // Track time spent in model vs tools
       let modelTime = firstResponseTime
       let toolsTime = 0
 
-      // Track each model and tool call segment with timestamps
       const timeSegments: TimeSegment[] = [
         {
           type: 'model',
@@ -236,114 +211,153 @@ export const groqProvider: ProviderConfig = {
       ]
 
       try {
-        while (iterationCount < MAX_ITERATIONS) {
-          // Check for tool calls
+        while (iterationCount < MAX_TOOL_ITERATIONS) {
+          if (currentResponse.choices[0]?.message?.content) {
+            content = currentResponse.choices[0].message.content
+          }
+
           const toolCallsInResponse = currentResponse.choices[0]?.message?.tool_calls
           if (!toolCallsInResponse || toolCallsInResponse.length === 0) {
             break
           }
 
-          // Track time for tool calls in this batch
           const toolsStartTime = Date.now()
 
-          // Process each tool call
-          for (const toolCall of toolCallsInResponse) {
+          const toolExecutionPromises = toolCallsInResponse.map(async (toolCall) => {
+            const toolCallStartTime = Date.now()
+            const toolName = toolCall.function.name
+
             try {
-              const toolName = toolCall.function.name
               const toolArgs = JSON.parse(toolCall.function.arguments)
-
-              // Get the tool from the tools registry
               const tool = request.tools?.find((t) => t.id === toolName)
-              if (!tool) continue
 
-              // Execute the tool
-              const toolCallStartTime = Date.now()
+              if (!tool) return null
 
               const { toolParams, executionParams } = prepareToolExecution(tool, toolArgs, request)
-
               const result = await executeTool(toolName, executionParams, true)
               const toolCallEndTime = Date.now()
-              const toolCallDuration = toolCallEndTime - toolCallStartTime
 
-              // Add to time segments for both success and failure
-              timeSegments.push({
-                type: 'tool',
-                name: toolName,
+              return {
+                toolCall,
+                toolName,
+                toolParams,
+                result,
                 startTime: toolCallStartTime,
                 endTime: toolCallEndTime,
-                duration: toolCallDuration,
-              })
-
-              // Prepare result content for the LLM
-              let resultContent: any
-              if (result.success) {
-                toolResults.push(result.output)
-                resultContent = result.output
-              } else {
-                // Include error information so LLM can respond appropriately
-                resultContent = {
-                  error: true,
-                  message: result.error || 'Tool execution failed',
-                  tool: toolName,
-                }
+                duration: toolCallEndTime - toolCallStartTime,
               }
-
-              toolCalls.push({
-                name: toolName,
-                arguments: toolParams,
-                startTime: new Date(toolCallStartTime).toISOString(),
-                endTime: new Date(toolCallEndTime).toISOString(),
-                duration: toolCallDuration,
-                result: resultContent,
-                success: result.success,
-              })
-
-              // Add the tool call and result to messages (both success and failure)
-              currentMessages.push({
-                role: 'assistant',
-                content: null,
-                tool_calls: [
-                  {
-                    id: toolCall.id,
-                    type: 'function',
-                    function: {
-                      name: toolName,
-                      arguments: toolCall.function.arguments,
-                    },
-                  },
-                ],
-              })
-
-              currentMessages.push({
-                role: 'tool',
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(resultContent),
-              })
             } catch (error) {
-              logger.error('Error processing tool call:', { error })
+              const toolCallEndTime = Date.now()
+              logger.error('Error processing tool call:', { error, toolName })
+
+              return {
+                toolCall,
+                toolName,
+                toolParams: {},
+                result: {
+                  success: false,
+                  output: undefined,
+                  error: error instanceof Error ? error.message : 'Tool execution failed',
+                },
+                startTime: toolCallStartTime,
+                endTime: toolCallEndTime,
+                duration: toolCallEndTime - toolCallStartTime,
+              }
             }
+          })
+
+          const executionResults = await Promise.allSettled(toolExecutionPromises)
+
+          currentMessages.push({
+            role: 'assistant',
+            content: null,
+            tool_calls: toolCallsInResponse.map((tc) => ({
+              id: tc.id,
+              type: 'function',
+              function: {
+                name: tc.function.name,
+                arguments: tc.function.arguments,
+              },
+            })),
+          })
+
+          for (const settledResult of executionResults) {
+            if (settledResult.status === 'rejected' || !settledResult.value) continue
+
+            const { toolCall, toolName, toolParams, result, startTime, endTime, duration } =
+              settledResult.value
+
+            timeSegments.push({
+              type: 'tool',
+              name: toolName,
+              startTime: startTime,
+              endTime: endTime,
+              duration: duration,
+            })
+
+            let resultContent: any
+            if (result.success) {
+              toolResults.push(result.output)
+              resultContent = result.output
+            } else {
+              resultContent = {
+                error: true,
+                message: result.error || 'Tool execution failed',
+                tool: toolName,
+              }
+            }
+
+            toolCalls.push({
+              name: toolName,
+              arguments: toolParams,
+              startTime: new Date(startTime).toISOString(),
+              endTime: new Date(endTime).toISOString(),
+              duration: duration,
+              result: resultContent,
+              success: result.success,
+            })
+
+            currentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(resultContent),
+            })
           }
 
-          // Calculate tool call time for this iteration
           const thisToolsTime = Date.now() - toolsStartTime
           toolsTime += thisToolsTime
 
-          // Make the next request with updated messages
+          let usedForcedTools: string[] = []
+          if (typeof originalToolChoice === 'object' && forcedTools.length > 0) {
+            const toolTracking = trackForcedToolUsage(
+              currentResponse.choices[0]?.message?.tool_calls,
+              originalToolChoice,
+              logger,
+              'openai',
+              forcedTools,
+              usedForcedTools
+            )
+            usedForcedTools = toolTracking.usedForcedTools
+            const nextToolChoice = toolTracking.nextToolChoice
+
+            if (nextToolChoice && typeof nextToolChoice === 'object') {
+              payload.tool_choice = nextToolChoice
+            } else if (nextToolChoice === 'auto' || !nextToolChoice) {
+              payload.tool_choice = 'auto'
+            }
+          }
+
           const nextPayload = {
             ...payload,
             messages: currentMessages,
           }
 
-          // Time the next model call
           const nextModelStartTime = Date.now()
-
-          // Make the next request
           currentResponse = await groq.chat.completions.create(nextPayload)
 
           const nextModelEndTime = Date.now()
           const thisModelTime = nextModelEndTime - nextModelStartTime
 
-          // Add to time segments
           timeSegments.push({
             type: 'model',
             name: `Model response (iteration ${iterationCount + 1})`,
@@ -352,18 +366,15 @@ export const groqProvider: ProviderConfig = {
             duration: thisModelTime,
           })
 
-          // Add to model time
           modelTime += thisModelTime
 
-          // Update content if we have a text response
           if (currentResponse.choices[0]?.message?.content) {
             content = currentResponse.choices[0].message.content
           }
 
-          // Update token counts
           if (currentResponse.usage) {
-            tokens.prompt += currentResponse.usage.prompt_tokens || 0
-            tokens.completion += currentResponse.usage.completion_tokens || 0
+            tokens.input += currentResponse.usage.prompt_tokens || 0
+            tokens.output += currentResponse.usage.completion_tokens || 0
             tokens.total += currentResponse.usage.total_tokens || 0
           }
 
@@ -373,32 +384,48 @@ export const groqProvider: ProviderConfig = {
         logger.error('Error in Groq request:', { error })
       }
 
-      // After all tool processing complete, if streaming was requested and we have messages, use streaming for the final response
       if (request.stream) {
         logger.info('Using streaming for final Groq response after tool processing')
 
-        // When streaming after tool calls with forced tools, make sure tool_choice is set to 'auto'
-        // This prevents the API from trying to force tool usage again in the final streaming response
         const streamingPayload = {
           ...payload,
           messages: currentMessages,
-          tool_choice: 'auto', // Always use 'auto' for the streaming response after tool calls
+          tool_choice: originalToolChoice || 'auto',
           stream: true,
         }
 
         const streamResponse = await groq.chat.completions.create(streamingPayload)
 
-        // Create a StreamingExecution response with all collected data
+        const accumulatedCost = calculateCost(request.model, tokens.input, tokens.output)
+
         const streamingResult = {
-          stream: createReadableStreamFromGroqStream(streamResponse),
+          stream: createReadableStreamFromGroqStream(streamResponse as any, (content, usage) => {
+            streamingResult.execution.output.content = content
+            streamingResult.execution.output.tokens = {
+              input: tokens.input + usage.prompt_tokens,
+              output: tokens.output + usage.completion_tokens,
+              total: tokens.total + usage.total_tokens,
+            }
+
+            const streamCost = calculateCost(
+              request.model,
+              usage.prompt_tokens,
+              usage.completion_tokens
+            )
+            streamingResult.execution.output.cost = {
+              input: accumulatedCost.input + streamCost.input,
+              output: accumulatedCost.output + streamCost.output,
+              total: accumulatedCost.total + streamCost.total,
+            }
+          }),
           execution: {
             success: true,
             output: {
-              content: '', // Will be filled by the callback
-              model: request.model || 'groq/meta-llama/llama-4-scout-17b-16e-instruct',
+              content: '',
+              model: request.model,
               tokens: {
-                prompt: tokens.prompt,
-                completion: tokens.completion,
+                input: tokens.input,
+                output: tokens.output,
                 total: tokens.total,
               },
               toolCalls:
@@ -419,12 +446,12 @@ export const groqProvider: ProviderConfig = {
                 timeSegments: timeSegments,
               },
               cost: {
-                total: (tokens.total || 0) * 0.0001,
-                input: (tokens.prompt || 0) * 0.0001,
-                output: (tokens.completion || 0) * 0.0001,
+                input: accumulatedCost.input,
+                output: accumulatedCost.output,
+                total: accumulatedCost.total,
               },
             },
-            logs: [], // No block logs at provider level
+            logs: [],
             metadata: {
               startTime: providerStartTimeISO,
               endTime: new Date().toISOString(),
@@ -434,11 +461,9 @@ export const groqProvider: ProviderConfig = {
           },
         }
 
-        // Return the streaming execution object
         return streamingResult as StreamingExecution
       }
 
-      // Calculate overall timing
       const providerEndTime = Date.now()
       const providerEndTimeISO = new Date(providerEndTime).toISOString()
       const totalDuration = providerEndTime - providerStartTime
@@ -461,7 +486,6 @@ export const groqProvider: ProviderConfig = {
         },
       }
     } catch (error) {
-      // Include timing information even for errors
       const providerEndTime = Date.now()
       const providerEndTimeISO = new Date(providerEndTime).toISOString()
       const totalDuration = providerEndTime - providerStartTime
@@ -471,9 +495,8 @@ export const groqProvider: ProviderConfig = {
         duration: totalDuration,
       })
 
-      // Create a new error with timing information
       const enhancedError = new Error(error instanceof Error ? error.message : String(error))
-      // @ts-ignore - Adding timing property to the error
+      // @ts-ignore
       enhancedError.timing = {
         startTime: providerStartTimeISO,
         endTime: providerEndTimeISO,

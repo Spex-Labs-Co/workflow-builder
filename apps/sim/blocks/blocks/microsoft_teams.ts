@@ -43,7 +43,6 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       id: 'credential',
       title: 'Microsoft Account',
       type: 'oauth-input',
-      provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [
         'openid',
@@ -75,7 +74,6 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Team',
       type: 'file-selector',
       canonicalParamId: 'teamId',
-      provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
       placeholder: 'Select a team',
@@ -119,7 +117,6 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Chat',
       type: 'file-selector',
       canonicalParamId: 'chatId',
-      provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
       placeholder: 'Select a chat',
@@ -147,7 +144,6 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       title: 'Select Channel',
       type: 'file-selector',
       canonicalParamId: 'channelId',
-      provider: 'microsoft-teams',
       serviceId: 'microsoft-teams',
       requiredScopes: [],
       placeholder: 'Select a channel',
@@ -231,6 +227,12 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
         value: ['set_reaction', 'unset_reaction'],
       },
       required: true,
+    },
+    {
+      id: 'includeAttachments',
+      title: 'Include Attachments',
+      type: 'switch',
+      condition: { field: 'operation', value: ['read_chat', 'read_channel'] },
     },
     // File upload (basic mode)
     {
@@ -324,6 +326,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
           files,
           messageId,
           reactionType,
+          includeAttachments,
           ...rest
         } = params
 
@@ -334,6 +337,10 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
         const baseParams: Record<string, any> = {
           ...rest,
           credential,
+        }
+
+        if ((operation === 'read_chat' || operation === 'read_channel') && includeAttachments) {
+          baseParams.includeAttachments = true
         }
 
         // Add files if provided
@@ -441,8 +448,12 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
       description: 'Message content. Mention users with <at>userName</at>',
     },
     reactionType: { type: 'string', description: 'Emoji reaction (e.g., ❤️, 👍, 😊)' },
+    includeAttachments: {
+      type: 'boolean',
+      description: 'Download and include message attachments',
+    },
     attachmentFiles: { type: 'json', description: 'Files to attach (UI upload)' },
-    files: { type: 'json', description: 'Files to attach (UserFile array)' },
+    files: { type: 'array', description: 'Files to attach (UserFile array)' },
   },
   outputs: {
     content: { type: 'string', description: 'Formatted message content from chat/channel' },
@@ -451,6 +462,7 @@ export const MicrosoftTeamsBlock: BlockConfig<MicrosoftTeamsResponse> = {
     messages: { type: 'json', description: 'Array of message objects' },
     totalAttachments: { type: 'number', description: 'Total number of attachments' },
     attachmentTypes: { type: 'json', description: 'Array of attachment content types' },
+    attachments: { type: 'array', description: 'Downloaded message attachments' },
     updatedContent: {
       type: 'boolean',
       description: 'Whether content was successfully updated/sent',

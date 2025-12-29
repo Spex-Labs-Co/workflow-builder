@@ -1,7 +1,8 @@
-import { createLogger } from '@/lib/logs/console/logger'
-import { BlockType, REFERENCE } from '@/executor/consts'
+import { createLogger } from '@sim/logger'
+import { BlockType } from '@/executor/constants'
 import type { ExecutionState, LoopScope } from '@/executor/execution/state'
 import type { ExecutionContext } from '@/executor/types'
+import { createEnvVarPattern, replaceValidReferences } from '@/executor/utils/reference-validation'
 import { BlockResolver } from '@/executor/variables/resolvers/block'
 import { EnvResolver } from '@/executor/variables/resolvers/env'
 import { LoopResolver } from '@/executor/variables/resolvers/loop'
@@ -147,21 +148,17 @@ export class VariableResolver {
     loopScope?: LoopScope,
     block?: SerializedBlock
   ): string {
-    let result = template
     const resolutionContext: ResolutionContext = {
       executionContext: ctx,
       executionState: this.state,
       currentNodeId,
       loopScope,
     }
-    const referenceRegex = new RegExp(
-      `${REFERENCE.START}([^${REFERENCE.END}]+)${REFERENCE.END}`,
-      'g'
-    )
 
     let replacementError: Error | null = null
 
-    result = result.replace(referenceRegex, (match) => {
+    // Use generic utility for smart variable reference replacement
+    let result = replaceValidReferences(template, (match) => {
       if (replacementError) return match
 
       try {
@@ -188,8 +185,7 @@ export class VariableResolver {
       throw replacementError
     }
 
-    const envRegex = new RegExp(`${REFERENCE.ENV_VAR_START}([^}]+)${REFERENCE.ENV_VAR_END}`, 'g')
-    result = result.replace(envRegex, (match) => {
+    result = result.replace(createEnvVarPattern(), (match) => {
       const resolved = this.resolveReference(match, resolutionContext)
       return typeof resolved === 'string' ? resolved : match
     })
@@ -202,21 +198,17 @@ export class VariableResolver {
     template: string,
     loopScope?: LoopScope
   ): string {
-    let result = template
     const resolutionContext: ResolutionContext = {
       executionContext: ctx,
       executionState: this.state,
       currentNodeId,
       loopScope,
     }
-    const referenceRegex = new RegExp(
-      `${REFERENCE.START}([^${REFERENCE.END}]+)${REFERENCE.END}`,
-      'g'
-    )
 
     let replacementError: Error | null = null
 
-    result = result.replace(referenceRegex, (match) => {
+    // Use generic utility for smart variable reference replacement
+    let result = replaceValidReferences(template, (match) => {
       if (replacementError) return match
 
       try {
@@ -243,8 +235,7 @@ export class VariableResolver {
       throw replacementError
     }
 
-    const envRegex = new RegExp(`${REFERENCE.ENV_VAR_START}([^}]+)${REFERENCE.ENV_VAR_END}`, 'g')
-    result = result.replace(envRegex, (match) => {
+    result = result.replace(createEnvVarPattern(), (match) => {
       const resolved = this.resolveReference(match, resolutionContext)
       return typeof resolved === 'string' ? resolved : match
     })

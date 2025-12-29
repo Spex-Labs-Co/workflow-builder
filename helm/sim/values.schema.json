@@ -185,8 +185,7 @@
             },
             "OLLAMA_URL": {
               "type": "string",
-              "format": "uri",
-              "description": "Ollama local LLM server URL"
+              "description": "Ollama local LLM server URL (leave empty if not using Ollama)"
             },
             "ELEVENLABS_API_KEY": {
               "type": "string",
@@ -238,15 +237,15 @@
             },
             "NEXT_PUBLIC_BRAND_LOGO_URL": {
               "type": "string",
-              "description": "Custom logo URL"
+              "description": "Custom logo URL (leave empty for default)"
             },
             "NEXT_PUBLIC_BRAND_FAVICON_URL": {
               "type": "string",
-              "description": "Custom favicon URL"
+              "description": "Custom favicon URL (leave empty for default)"
             },
             "NEXT_PUBLIC_CUSTOM_CSS_URL": {
               "type": "string",
-              "description": "Custom stylesheet URL"
+              "description": "Custom stylesheet URL (leave empty for none)"
             },
             "NEXT_PUBLIC_SUPPORT_EMAIL": {
               "type": "string",

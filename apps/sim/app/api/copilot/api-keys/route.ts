@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { env } from '@/lib/env'
-import { SIM_AGENT_API_URL_DEFAULT } from '@/lib/sim-agent/constants'
+import { SIM_AGENT_API_URL_DEFAULT } from '@/lib/copilot/constants'
+import { env } from '@/lib/core/config/env'
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,7 +27,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to get keys' }, { status: res.status || 500 })
     }
 
-    const apiKeys = (await res.json().catch(() => null)) as { id: string; apiKey: string }[] | null
+    const apiKeys = (await res.json().catch(() => null)) as
+      | { id: string; apiKey: string; name?: string; createdAt?: string; lastUsed?: string }[]
+      | null
 
     if (!Array.isArray(apiKeys)) {
       return NextResponse.json({ error: 'Invalid response from Sim Agent' }, { status: 500 })
@@ -37,7 +39,13 @@ export async function GET(request: NextRequest) {
       const value = typeof k.apiKey === 'string' ? k.apiKey : ''
       const last6 = value.slice(-6)
       const displayKey = `•••••${last6}`
-      return { id: k.id, displayKey }
+      return {
+        id: k.id,
+        displayKey,
+        name: k.name || null,
+        createdAt: k.createdAt || null,
+        lastUsed: k.lastUsed || null,
+      }
     })
 
     return NextResponse.json({ keys }, { status: 200 })

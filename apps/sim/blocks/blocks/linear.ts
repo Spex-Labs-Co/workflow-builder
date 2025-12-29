@@ -129,7 +129,6 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       id: 'credential',
       title: 'Linear Account',
       type: 'oauth-input',
-      provider: 'linear',
       serviceId: 'linear',
       requiredScopes: ['read', 'write'],
       placeholder: 'Select Linear account',
@@ -141,11 +140,21 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       title: 'Team',
       type: 'project-selector',
       canonicalParamId: 'teamId',
-      provider: 'linear',
       serviceId: 'linear',
       placeholder: 'Select a team',
       dependsOn: ['credential'],
       mode: 'basic',
+      required: {
+        field: 'operation',
+        value: [
+          'linear_create_issue',
+          'linear_create_project',
+          'linear_list_workflow_states',
+          'linear_create_workflow_state',
+          'linear_create_cycle',
+          'linear_get_active_cycle',
+        ],
+      },
       condition: {
         field: 'operation',
         value: [
@@ -172,6 +181,17 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       canonicalParamId: 'teamId',
       placeholder: 'Enter Linear team ID',
       mode: 'advanced',
+      required: {
+        field: 'operation',
+        value: [
+          'linear_create_issue',
+          'linear_create_project',
+          'linear_list_workflow_states',
+          'linear_create_workflow_state',
+          'linear_create_cycle',
+          'linear_get_active_cycle',
+        ],
+      },
       condition: {
         field: 'operation',
         value: [
@@ -196,11 +216,20 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       title: 'Project',
       type: 'project-selector',
       canonicalParamId: 'projectId',
-      provider: 'linear',
       serviceId: 'linear',
       placeholder: 'Select a project',
       dependsOn: ['credential', 'teamId'],
       mode: 'basic',
+      required: {
+        field: 'operation',
+        value: [
+          'linear_get_project',
+          'linear_update_project',
+          'linear_archive_project',
+          'linear_delete_project',
+          'linear_list_project_updates',
+        ],
+      },
       condition: {
         field: 'operation',
         value: [
@@ -223,6 +252,18 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       canonicalParamId: 'projectId',
       placeholder: 'Enter Linear project ID',
       mode: 'advanced',
+      required: {
+        field: 'operation',
+        value: [
+          'linear_get_project',
+          'linear_update_project',
+          'linear_archive_project',
+          'linear_delete_project',
+          'linear_create_project_update',
+          'linear_list_project_updates',
+          'linear_create_project_link',
+        ],
+      },
       condition: {
         field: 'operation',
         value: [
@@ -299,7 +340,10 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       title: 'Comment',
       type: 'long-input',
       placeholder: 'Enter comment text',
-      required: true,
+      required: {
+        field: 'operation',
+        value: ['linear_create_comment', 'linear_create_project_update'],
+      },
       condition: {
         field: 'operation',
         value: ['linear_create_comment', 'linear_update_comment', 'linear_create_project_update'],
@@ -505,6 +549,7 @@ export const LinearBlock: BlockConfig<LinearResponse> = {
       title: 'Title',
       type: 'short-input',
       placeholder: 'Enter attachment title',
+      required: true,
       condition: {
         field: 'operation',
         value: ['linear_create_attachment', 'linear_update_attachment'],

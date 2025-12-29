@@ -1,73 +1,75 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { organizationKeys } from './organization'
+import { organizationKeys } from '@/hooks/queries/organization'
 
 /**
  * Query key factories for subscription-related queries
  */
 export const subscriptionKeys = {
   all: ['subscription'] as const,
-  user: () => [...subscriptionKeys.all, 'user'] as const,
+  user: (includeOrg?: boolean) => [...subscriptionKeys.all, 'user', { includeOrg }] as const,
   usage: () => [...subscriptionKeys.all, 'usage'] as const,
 }
 
 /**
  * Fetch user subscription data
+ * @param includeOrg - Whether to include organization role data
  */
-async function fetchSubscriptionData() {
-  const response = await fetch('/api/billing?context=user')
+async function fetchSubscriptionData(includeOrg = false) {
+  const params = new URLSearchParams({ context: 'user' })
+  if (includeOrg) params.set('includeOrg', 'true')
+
+  const response = await fetch(`/api/billing?${params}`)
   if (!response.ok) {
     throw new Error('Failed to fetch subscription data')
   }
   return response.json()
 }
 
+interface UseSubscriptionDataOptions {
+  /** Include organization membership and role data */
+  includeOrg?: boolean
+}
+
 /**
  * Hook to fetch user subscription data
+ * @param options - Optional configuration
  */
-export function useSubscriptionData() {
+export function useSubscriptionData(options: UseSubscriptionDataOptions = {}) {
+  const { includeOrg = false } = options
+
   return useQuery({
-    queryKey: subscriptionKeys.user(),
-    queryFn: fetchSubscriptionData,
+    queryKey: subscriptionKeys.user(includeOrg),
+    queryFn: () => fetchSubscriptionData(includeOrg),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   })
 }
 
 /**
- * Fetch user usage data
+ * Fetch user usage limit metadata
+ * Note: This endpoint returns limit information (currentLimit, minimumLimit, canEdit, etc.)
+ * For actual usage data (current, limit, percentUsed), use useSubscriptionData() instead
  */
-async function fetchUsageData() {
+async function fetchUsageLimitData() {
   const response = await fetch('/api/usage?context=user')
   if (!response.ok) {
-    throw new Error('Failed to fetch usage data')
+    throw new Error('Failed to fetch usage limit data')
   }
   return response.json()
 }
 
 /**
- * Base hook to fetch user usage data (single query)
+ * Hook to fetch usage limit metadata
+ * Returns: currentLimit, minimumLimit, canEdit, plan, updatedAt
+ * Use this for editing usage limits, not for displaying current usage
  */
-function useUsageDataBase() {
+export function useUsageLimitData() {
   return useQuery({
     queryKey: subscriptionKeys.usage(),
-    queryFn: fetchUsageData,
+    queryFn: fetchUsageLimitData,
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   })
-}
-
-/**
- * Hook to fetch user usage data
- */
-export function useUsageData() {
-  return useUsageDataBase()
-}
-
-/**
- * Hook to fetch usage limit data
- */
-export function useUsageLimitData() {
-  return useUsageDataBase()
 }
 
 /**
@@ -95,10 +97,63 @@ export function useUpdateUsageLimit() {
 
       return response.json()
     },
-    onSuccess: () => {
-      // Invalidate all subscription-related queries
-      queryClient.invalidateQueries({ queryKey: subscriptionKeys.user() })
-      queryClient.invalidateQueries({ queryKey: subscriptionKeys.usage() })
+    onMutate: async ({ limit }) => {
+      await queryClient.cancelQueries({ queryKey: subscriptionKeys.all })
+
+      const previousSubscriptionData = queryClient.getQueryData(subscriptionKeys.user(false))
+      const previousSubscriptionDataWithOrg = queryClient.getQueryData(subscriptionKeys.user(true))
+      const previousUsageData = queryClient.getQueryData(subscriptionKeys.usage())
+
+      const updateSubscriptionData = (old: any) => {
+        if (!old) return old
+        const currentUsage = old.data?.usage?.current || 0
+        const newPercentUsed = limit > 0 ? (currentUsage / limit) * 100 : 0
+
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            usage: {
+              ...old.data?.usage,
+              limit,
+              percentUsed: newPercentUsed,
+            },
+          },
+        }
+      }
+
+      queryClient.setQueryData(subscriptionKeys.user(false), updateSubscriptionData)
+      queryClient.setQueryData(subscriptionKeys.user(true), updateSubscriptionData)
+
+      queryClient.setQueryData(subscriptionKeys.usage(), (old: any) => {
+        if (!old) return old
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            currentLimit: limit,
+          },
+        }
+      })
+
+      return { previousSubscriptionData, previousSubscriptionDataWithOrg, previousUsageData }
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousSubscriptionData) {
+        queryClient.setQueryData(subscriptionKeys.user(false), context.previousSubscriptionData)
+      }
+      if (context?.previousSubscriptionDataWithOrg) {
+        queryClient.setQueryData(
+          subscriptionKeys.user(true),
+          context.previousSubscriptionDataWithOrg
+        )
+      }
+      if (context?.previousUsageData) {
+        queryClient.setQueryData(subscriptionKeys.usage(), context.previousUsageData)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: subscriptionKeys.all })
     },
   })
 }
@@ -116,15 +171,11 @@ export function useUpgradeSubscription() {
 
   return useMutation({
     mutationFn: async ({ plan }: UpgradeSubscriptionParams) => {
-      // This will be handled by the existing subscription upgrade flow
-      // We just need to ensure proper cache invalidation
       return { plan }
     },
     onSuccess: (_data, variables) => {
-      // Invalidate all subscription queries
       queryClient.invalidateQueries({ queryKey: subscriptionKeys.all })
 
-      // Also invalidate organization billing if org context
       if (variables.orgId) {
         queryClient.invalidateQueries({
           queryKey: organizationKeys.billing(variables.orgId),

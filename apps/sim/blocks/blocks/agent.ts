@@ -1,6 +1,6 @@
+import { createLogger } from '@sim/logger'
 import { AgentIcon } from '@/components/icons'
-import { isHosted } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
+import { isHosted } from '@/lib/core/config/feature-flags'
 import type { BlockConfig } from '@/blocks/types'
 import { AuthMode } from '@/blocks/types'
 import {
@@ -8,7 +8,11 @@ import {
   getHostedModels,
   getMaxTemperature,
   getProviderIcon,
+  getReasoningEffortValuesForModel,
+  getThinkingLevelsForModel,
+  getVerbosityValuesForModel,
   MODELS_WITH_REASONING_EFFORT,
+  MODELS_WITH_THINKING,
   MODELS_WITH_VERBOSITY,
   providers,
   supportsTemperature,
@@ -16,6 +20,10 @@ import {
 
 const getCurrentOllamaModels = () => {
   return useProvidersStore.getState().providers.ollama.models
+}
+
+const getCurrentVLLMModels = () => {
+  return useProvidersStore.getState().providers.vllm.models
 }
 
 import { useProvidersStore } from '@/stores/providers/store'
@@ -65,8 +73,7 @@ export const AgentBlock: BlockConfig<AgentResponse> = {
   longDescription:
     'The Agent block is a core workflow block that is a wrapper around an LLM. It takes in system/user prompts and calls an LLM provider. It can also make tool calls by directly containing tools inside of its tool input. It can additionally return structured output.',
   bestPractices: `
-  - Cannot use core blocks like API, Webhook, Function, Workflow, Memory as tools. Only integrations or custom tools. 
-  - Check custom tools examples for YAML syntax. Only construct these if there isn't an existing integration for that purpose.
+  - Prefer using integrations as tools within the agent block over separate integration blocks unless complete determinism needed. 
   - Response Format should be a valid JSON Schema. This determines the output of the agent only if present. Fields can be accessed at root level by the following blocks: e.g. <agent1.field>. If response format is not present, the agent will return the standard outputs: content, model, tokens, toolCalls.
   `,
   docsLink: 'https://docs.sim.ai/blocks/agent',
@@ -75,81 +82,10 @@ export const AgentBlock: BlockConfig<AgentResponse> = {
   icon: AgentIcon,
   subBlocks: [
     {
-      id: 'systemPrompt',
-      title: 'System Prompt',
-      type: 'long-input',
-      placeholder: 'Enter system prompt...',
-      rows: 5,
-      wandConfig: {
-        enabled: true,
-        maintainHistory: true, // Enable conversation history for iterative improvements
-        prompt: `You are an expert system prompt engineer. Create a system prompt based on the user's request.
-
-### CONTEXT
-{context}
-
-### INSTRUCTIONS
-Write a system prompt following best practices. Match the complexity level the user requests.
-
-### CORE PRINCIPLES
-1. **Role Definition**: Start with "You are..." to establish identity and function
-2. **Direct Commands**: Use action verbs like "Analyze", "Generate", "Classify"
-3. **Be Specific**: Include output format, quality standards, behaviors, target audience
-4. **Clear Boundaries**: Define focus areas and priorities
-5. **Examples**: Add concrete examples when helpful
-
-### STRUCTURE
-- **Primary Role**: Clear identity statement
-- **Core Capabilities**: Main functions and expertise
-- **Behavioral Guidelines**: Task approach and interaction style
-- **Output Requirements**: Format, style, quality expectations
-- **Tool Integration**: Specific tool usage instructions
-
-### TOOL INTEGRATION
-When users mention tools, include explicit instructions:
-- **Web Search**: "Use Exa to gather current information from authoritative sources"
-- **Communication**: "Send messages via Slack/Discord/Teams with appropriate tone"
-- **Email**: "Compose emails through Gmail with professional formatting"
-- **Data**: "Query databases, analyze spreadsheets, call APIs as needed"
-
-### EXAMPLES
-
-**Simple**: "Create a customer service agent"
-→ You are a professional customer service representative. Respond to inquiries about orders, returns, and products with empathy and efficiency. Maintain a helpful tone while providing accurate information and clear next steps.
-
-**Detailed**: "Build a research assistant for market analysis"
-→ You are an expert market research analyst specializing in competitive intelligence and industry trends. Conduct thorough market analysis using systematic methodologies.
-
-Use Exa to gather information from industry sources, financial reports, and market research firms. Cross-reference findings across multiple credible sources.
-
-For each request, follow this structure:
-1. Define research scope and key questions
-2. Identify market segments and competitors
-3. Gather quantitative data (market size, growth rates)
-4. Collect qualitative insights (trends, consumer behavior)
-5. Synthesize findings into actionable recommendations
-
-Present findings in executive-ready formats with source citations, highlight key insights, and provide specific recommendations with rationale.
-
-### FINAL INSTRUCTION
-Create a system prompt appropriately detailed for the request, using clear language and relevant tool instructions.`,
-        placeholder: 'Describe the AI agent you want to create...',
-        generationType: 'system-prompt',
-      },
-    },
-    {
-      id: 'userPrompt',
-      title: 'User Prompt',
-      type: 'long-input',
-      placeholder: 'Enter context or user message...',
-      rows: 5,
-    },
-    {
-      id: 'memories',
-      title: 'Memories',
-      type: 'short-input',
-      placeholder: 'Connect memory block output...',
-      mode: 'advanced',
+      id: 'messages',
+      // title: 'Messages',
+      type: 'messages-input',
+      placeholder: 'Enter messages...',
     },
     {
       id: 'model',
@@ -157,12 +93,17 @@ Create a system prompt appropriately detailed for the request, using clear langu
       type: 'combobox',
       placeholder: 'Type or select a model...',
       required: true,
+      defaultValue: 'claude-sonnet-4-5',
+      searchable: true,
       options: () => {
         const providersState = useProvidersStore.getState()
         const baseModels = providersState.providers.base.models
         const ollamaModels = providersState.providers.ollama.models
+        const vllmModels = providersState.providers.vllm.models
         const openrouterModels = providersState.providers.openrouter.models
-        const allModels = Array.from(new Set([...baseModels, ...ollamaModels, ...openrouterModels]))
+        const allModels = Array.from(
+          new Set([...baseModels, ...ollamaModels, ...vllmModels, ...openrouterModels])
+        )
 
         return allModels.map((model) => {
           const icon = getProviderIcon(model)
@@ -171,38 +112,17 @@ Create a system prompt appropriately detailed for the request, using clear langu
       },
     },
     {
-      id: 'temperature',
-      title: 'Temperature',
-      type: 'slider',
-      min: 0,
-      max: 1,
-      defaultValue: 0.5,
-      condition: () => ({
+      id: 'vertexCredential',
+      title: 'Google Cloud Account',
+      type: 'oauth-input',
+      serviceId: 'vertex-ai',
+      requiredScopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      placeholder: 'Select Google Cloud account',
+      required: true,
+      condition: {
         field: 'model',
-        value: (() => {
-          const allModels = Object.keys(getAllModelProviders())
-          return allModels.filter(
-            (model) => supportsTemperature(model) && getMaxTemperature(model) === 1
-          )
-        })(),
-      }),
-    },
-    {
-      id: 'temperature',
-      title: 'Temperature',
-      type: 'slider',
-      min: 0,
-      max: 2,
-      defaultValue: 1,
-      condition: () => ({
-        field: 'model',
-        value: (() => {
-          const allModels = Object.keys(getAllModelProviders())
-          return allModels.filter(
-            (model) => supportsTemperature(model) && getMaxTemperature(model) === 2
-          )
-        })(),
-      }),
+        value: providers.vertex.models,
+      },
     },
     {
       id: 'reasoningEffort',
@@ -210,11 +130,47 @@ Create a system prompt appropriately detailed for the request, using clear langu
       type: 'dropdown',
       placeholder: 'Select reasoning effort...',
       options: [
-        { label: 'minimal', id: 'minimal' },
         { label: 'low', id: 'low' },
         { label: 'medium', id: 'medium' },
         { label: 'high', id: 'high' },
       ],
+      dependsOn: ['model'],
+      fetchOptions: async (blockId: string) => {
+        const { useSubBlockStore } = await import('@/stores/workflows/subblock/store')
+        const { useWorkflowRegistry } = await import('@/stores/workflows/registry/store')
+
+        const activeWorkflowId = useWorkflowRegistry.getState().activeWorkflowId
+        if (!activeWorkflowId) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const workflowValues = useSubBlockStore.getState().workflowValues[activeWorkflowId]
+        const blockValues = workflowValues?.[blockId]
+        const modelValue = blockValues?.model as string
+
+        if (!modelValue) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const validOptions = getReasoningEffortValuesForModel(modelValue)
+        if (!validOptions) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        return validOptions.map((opt) => ({ label: opt, id: opt }))
+      },
       value: () => 'medium',
       condition: {
         field: 'model',
@@ -231,6 +187,43 @@ Create a system prompt appropriately detailed for the request, using clear langu
         { label: 'medium', id: 'medium' },
         { label: 'high', id: 'high' },
       ],
+      dependsOn: ['model'],
+      fetchOptions: async (blockId: string) => {
+        const { useSubBlockStore } = await import('@/stores/workflows/subblock/store')
+        const { useWorkflowRegistry } = await import('@/stores/workflows/registry/store')
+
+        const activeWorkflowId = useWorkflowRegistry.getState().activeWorkflowId
+        if (!activeWorkflowId) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const workflowValues = useSubBlockStore.getState().workflowValues[activeWorkflowId]
+        const blockValues = workflowValues?.[blockId]
+        const modelValue = blockValues?.model as string
+
+        if (!modelValue) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const validOptions = getVerbosityValuesForModel(modelValue)
+        if (!validOptions) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'medium', id: 'medium' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        return validOptions.map((opt) => ({ label: opt, id: opt }))
+      },
       value: () => 'medium',
       condition: {
         field: 'model',
@@ -238,26 +231,57 @@ Create a system prompt appropriately detailed for the request, using clear langu
       },
     },
     {
-      id: 'apiKey',
-      title: 'API Key',
-      type: 'short-input',
-      placeholder: 'Enter your API key',
-      password: true,
-      connectionDroppable: false,
-      required: true,
-      // Hide API key for hosted models and Ollama models
-      condition: isHosted
-        ? {
-            field: 'model',
-            value: getHostedModels(),
-            not: true, // Show for all models EXCEPT those listed
-          }
-        : () => ({
-            field: 'model',
-            value: getCurrentOllamaModels(),
-            not: true, // Show for all models EXCEPT Ollama models
-          }),
+      id: 'thinkingLevel',
+      title: 'Thinking Level',
+      type: 'dropdown',
+      placeholder: 'Select thinking level...',
+      options: [
+        { label: 'minimal', id: 'minimal' },
+        { label: 'low', id: 'low' },
+        { label: 'medium', id: 'medium' },
+        { label: 'high', id: 'high' },
+      ],
+      dependsOn: ['model'],
+      fetchOptions: async (blockId: string) => {
+        const { useSubBlockStore } = await import('@/stores/workflows/subblock/store')
+        const { useWorkflowRegistry } = await import('@/stores/workflows/registry/store')
+
+        const activeWorkflowId = useWorkflowRegistry.getState().activeWorkflowId
+        if (!activeWorkflowId) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const workflowValues = useSubBlockStore.getState().workflowValues[activeWorkflowId]
+        const blockValues = workflowValues?.[blockId]
+        const modelValue = blockValues?.model as string
+
+        if (!modelValue) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        const validOptions = getThinkingLevelsForModel(modelValue)
+        if (!validOptions) {
+          return [
+            { label: 'low', id: 'low' },
+            { label: 'high', id: 'high' },
+          ]
+        }
+
+        return validOptions.map((opt) => ({ label: opt, id: opt }))
+      },
+      value: () => 'high',
+      condition: {
+        field: 'model',
+        value: MODELS_WITH_THINKING,
+      },
     },
+
     {
       id: 'azureEndpoint',
       title: 'Azure OpenAI Endpoint',
@@ -282,10 +306,140 @@ Create a system prompt appropriately detailed for the request, using clear langu
       },
     },
     {
+      id: 'vertexProject',
+      title: 'Vertex AI Project',
+      type: 'short-input',
+      placeholder: 'your-gcp-project-id',
+      connectionDroppable: false,
+      required: true,
+      condition: {
+        field: 'model',
+        value: providers.vertex.models,
+      },
+    },
+    {
+      id: 'vertexLocation',
+      title: 'Vertex AI Location',
+      type: 'short-input',
+      placeholder: 'us-central1',
+      connectionDroppable: false,
+      required: true,
+      condition: {
+        field: 'model',
+        value: providers.vertex.models,
+      },
+    },
+    {
       id: 'tools',
       title: 'Tools',
       type: 'tool-input',
       defaultValue: [],
+    },
+    {
+      id: 'apiKey',
+      title: 'API Key',
+      type: 'short-input',
+      placeholder: 'Enter your API key',
+      password: true,
+      connectionDroppable: false,
+      required: true,
+      // Hide API key for hosted models, Ollama models, vLLM models, and Vertex models (uses OAuth)
+      condition: isHosted
+        ? {
+            field: 'model',
+            value: [...getHostedModels(), ...providers.vertex.models],
+            not: true, // Show for all models EXCEPT those listed
+          }
+        : () => ({
+            field: 'model',
+            value: [
+              ...getCurrentOllamaModels(),
+              ...getCurrentVLLMModels(),
+              ...providers.vertex.models,
+            ],
+            not: true, // Show for all models EXCEPT Ollama, vLLM, and Vertex models
+          }),
+    },
+    {
+      id: 'memoryType',
+      title: 'Memory',
+      type: 'dropdown',
+      placeholder: 'Select memory...',
+      options: [
+        { label: 'None', id: 'none' },
+        { label: 'Conversation', id: 'conversation' },
+        { label: 'Sliding window (messages)', id: 'sliding_window' },
+        { label: 'Sliding window (tokens)', id: 'sliding_window_tokens' },
+      ],
+      defaultValue: 'none',
+    },
+    {
+      id: 'conversationId',
+      title: 'Conversation ID',
+      type: 'short-input',
+      placeholder: 'e.g., user-123, session-abc, customer-456',
+      required: {
+        field: 'memoryType',
+        value: ['conversation', 'sliding_window', 'sliding_window_tokens'],
+      },
+      condition: {
+        field: 'memoryType',
+        value: ['conversation', 'sliding_window', 'sliding_window_tokens'],
+      },
+    },
+    {
+      id: 'slidingWindowSize',
+      title: 'Sliding Window Size',
+      type: 'short-input',
+      placeholder: 'Enter number of messages (e.g., 10)...',
+      condition: {
+        field: 'memoryType',
+        value: ['sliding_window'],
+      },
+    },
+    {
+      id: 'slidingWindowTokens',
+      title: 'Max Tokens',
+      type: 'short-input',
+      placeholder: 'Enter max tokens (e.g., 4000)...',
+      condition: {
+        field: 'memoryType',
+        value: ['sliding_window_tokens'],
+      },
+    },
+    {
+      id: 'temperature',
+      title: 'Temperature',
+      type: 'slider',
+      min: 0,
+      max: 1,
+      defaultValue: 0.3,
+      condition: () => ({
+        field: 'model',
+        value: (() => {
+          const allModels = Object.keys(getAllModelProviders())
+          return allModels.filter(
+            (model) => supportsTemperature(model) && getMaxTemperature(model) === 1
+          )
+        })(),
+      }),
+    },
+    {
+      id: 'temperature',
+      title: 'Temperature',
+      type: 'slider',
+      min: 0,
+      max: 2,
+      defaultValue: 0.3,
+      condition: () => ({
+        field: 'model',
+        value: (() => {
+          const allModels = Object.keys(getAllModelProviders())
+          return allModels.filter(
+            (model) => supportsTemperature(model) && getMaxTemperature(model) === 2
+          )
+        })(),
+      }),
     },
     {
       id: 'responseFormat',
@@ -397,7 +551,7 @@ Example 3 (Array Input):
     ],
     config: {
       tool: (params: Record<string, any>) => {
-        const model = params.model || 'gpt-4o'
+        const model = params.model || 'claude-sonnet-4-5'
         if (!model) {
           throw new Error('No model selected')
         }
@@ -449,13 +603,37 @@ Example 3 (Array Input):
     },
   },
   inputs: {
-    systemPrompt: { type: 'string', description: 'Initial system instructions' },
-    userPrompt: { type: 'string', description: 'User message or context' },
-    memories: { type: 'json', description: 'Agent memory data' },
+    messages: {
+      type: 'json',
+      description:
+        'Array of message objects with role and content: [{ role: "system", content: "..." }, { role: "user", content: "..." }]',
+    },
+    memoryType: {
+      type: 'string',
+      description:
+        'Type of memory to use: none, conversation, sliding_window, or sliding_window_tokens',
+    },
+    conversationId: {
+      type: 'string',
+      description:
+        'Specific conversation ID to retrieve memories from (when memoryType is conversation_id)',
+    },
+    slidingWindowSize: {
+      type: 'string',
+      description:
+        'Number of recent messages to include (when memoryType is sliding_window, e.g., "10")',
+    },
+    slidingWindowTokens: {
+      type: 'string',
+      description:
+        'Maximum number of tokens for token-based sliding window memory (when memoryType is sliding_window_tokens, e.g., "4000")',
+    },
     model: { type: 'string', description: 'AI model to use' },
     apiKey: { type: 'string', description: 'Provider API key' },
     azureEndpoint: { type: 'string', description: 'Azure OpenAI endpoint URL' },
     azureApiVersion: { type: 'string', description: 'Azure API version' },
+    vertexProject: { type: 'string', description: 'Google Cloud project ID for Vertex AI' },
+    vertexLocation: { type: 'string', description: 'Google Cloud location for Vertex AI' },
     responseFormat: {
       type: 'json',
       description: 'JSON response format schema',
@@ -503,6 +681,7 @@ Example 3 (Array Input):
     temperature: { type: 'number', description: 'Response randomness level' },
     reasoningEffort: { type: 'string', description: 'Reasoning effort level for GPT-5 models' },
     verbosity: { type: 'string', description: 'Verbosity level for GPT-5 models' },
+    thinkingLevel: { type: 'string', description: 'Thinking level for Gemini 3 models' },
     tools: { type: 'json', description: 'Available tools configuration' },
   },
   outputs: {

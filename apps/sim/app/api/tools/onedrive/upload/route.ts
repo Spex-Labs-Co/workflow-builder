@@ -1,11 +1,16 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { z } from 'zod'
 import { checkHybridAuth } from '@/lib/auth/hybrid'
-import { createLogger } from '@/lib/logs/console/logger'
-import { processSingleFileToUserFile } from '@/lib/uploads/utils/file-utils'
+import { validateMicrosoftGraphId } from '@/lib/core/security/input-validation'
+import { generateRequestId } from '@/lib/core/utils/request'
+import {
+  getExtensionFromMimeType,
+  processSingleFileToUserFile,
+} from '@/lib/uploads/utils/file-utils'
 import { downloadFileFromStorage } from '@/lib/uploads/utils/file-utils.server'
-import { generateRequestId } from '@/lib/utils'
+import { normalizeExcelValues } from '@/tools/onedrive/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,14 +18,21 @@ const logger = createLogger('OneDriveUploadAPI')
 
 const MICROSOFT_GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 
+const ExcelCellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()])
+const ExcelRowSchema = z.array(ExcelCellSchema)
+const ExcelValuesSchema = z.union([
+  z.string(),
+  z.array(ExcelRowSchema),
+  z.array(z.record(ExcelCellSchema)),
+])
+
 const OneDriveUploadSchema = z.object({
   accessToken: z.string().min(1, 'Access token is required'),
   fileName: z.string().min(1, 'File name is required'),
-  file: z.any().optional(), // UserFile object (optional for blank Excel creation)
+  file: z.any().optional(),
   folderId: z.string().optional().nullable(),
-  mimeType: z.string().optional(),
-  // Optional Excel write-after-create inputs
-  values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))).optional(),
+  mimeType: z.string().nullish(),
+  values: ExcelValuesSchema.optional().nullable(),
 })
 
 export async function POST(request: NextRequest) {
@@ -46,28 +58,24 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const validatedData = OneDriveUploadSchema.parse(body)
+    const excelValues = normalizeExcelValues(validatedData.values)
 
     let fileBuffer: Buffer
     let mimeType: string
 
-    // Check if we're creating a blank Excel file
     const isExcelCreation =
       validatedData.mimeType ===
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && !validatedData.file
 
     if (isExcelCreation) {
-      // Create a blank Excel workbook
-
       const workbook = XLSX.utils.book_new()
       const worksheet = XLSX.utils.aoa_to_sheet([[]])
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1')
 
-      // Generate XLSX file as buffer
       const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
       fileBuffer = Buffer.from(xlsxBuffer)
       mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     } else {
-      // Handle regular file upload
       const rawFile = validatedData.file
 
       if (!rawFile) {
@@ -96,7 +104,6 @@ export async function POST(request: NextRequest) {
         fileToProcess = rawFile
       }
 
-      // Convert to UserFile format
       let userFile
       try {
         userFile = processSingleFileToUserFile(fileToProcess, requestId, logger)
@@ -126,7 +133,7 @@ export async function POST(request: NextRequest) {
       mimeType = userFile.type || 'application/octet-stream'
     }
 
-    const maxSize = 250 * 1024 * 1024 // 250MB
+    const maxSize = 250 * 1024 * 1024
     if (fileBuffer.length > maxSize) {
       const sizeMB = (fileBuffer.length / (1024 * 1024)).toFixed(2)
       logger.warn(`[${requestId}] File too large: ${sizeMB}MB`)
@@ -139,9 +146,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ensure file name has correct extension for Excel files
     let fileName = validatedData.fileName
-    if (isExcelCreation && !fileName.endsWith('.xlsx')) {
+    const hasExtension = fileName.includes('.') && fileName.lastIndexOf('.') > 0
+
+    if (!hasExtension) {
+      const extension = getExtensionFromMimeType(mimeType)
+      if (extension) {
+        fileName = `${fileName}.${extension}`
+        logger.info(`[${requestId}] Added extension to filename: ${fileName}`)
+      }
+    } else if (isExcelCreation && !fileName.endsWith('.xlsx')) {
       fileName = `${fileName.replace(/\.[^.]*$/, '')}.xlsx`
     }
 
@@ -149,6 +163,17 @@ export async function POST(request: NextRequest) {
     const folderId = validatedData.folderId?.trim()
 
     if (folderId && folderId !== '') {
+      const folderIdValidation = validateMicrosoftGraphId(folderId, 'folderId')
+      if (!folderIdValidation.isValid) {
+        logger.warn(`[${requestId}] Invalid folder ID`, { error: folderIdValidation.error })
+        return NextResponse.json(
+          {
+            success: false,
+            error: folderIdValidation.error,
+          },
+          { status: 400 }
+        )
+      }
       uploadUrl = `${MICROSOFT_GRAPH_BASE}/me/drive/items/${encodeURIComponent(folderId)}:/${encodeURIComponent(fileName)}:/content`
     } else {
       uploadUrl = `${MICROSOFT_GRAPH_BASE}/me/drive/root:/${encodeURIComponent(fileName)}:/content`
@@ -177,14 +202,12 @@ export async function POST(request: NextRequest) {
 
     const fileData = await uploadResponse.json()
 
-    // If this is an Excel creation and values were provided, write them using the Excel API
     let excelWriteResult: any | undefined
     const shouldWriteExcelContent =
-      isExcelCreation && Array.isArray(validatedData.values) && validatedData.values.length > 0
+      isExcelCreation && Array.isArray(excelValues) && excelValues.length > 0
 
     if (shouldWriteExcelContent) {
       try {
-        // Create a workbook session to ensure reliability and persistence of changes
         let workbookSessionId: string | undefined
         const sessionResp = await fetch(
           `${MICROSOFT_GRAPH_BASE}/me/drive/items/${encodeURIComponent(fileData.id)}/workbook/createSession`,
@@ -203,7 +226,6 @@ export async function POST(request: NextRequest) {
           workbookSessionId = sessionData?.id
         }
 
-        // Determine the first worksheet name
         let sheetName = 'Sheet1'
         try {
           const listUrl = `${MICROSOFT_GRAPH_BASE}/me/drive/items/${encodeURIComponent(
@@ -232,7 +254,7 @@ export async function POST(request: NextRequest) {
           logger.warn(`[${requestId}] Error listing worksheets, using default Sheet1`, listError)
         }
 
-        let processedValues: any = validatedData.values || []
+        let processedValues: any = excelValues || []
 
         if (
           Array.isArray(processedValues) &&
@@ -252,7 +274,6 @@ export async function POST(request: NextRequest) {
           return paddedRow
         })
 
-        // Compute concise end range from A1 and matrix size (no network round-trip)
         const indexToColLetters = (index: number): string => {
           let n = index
           let s = ''
@@ -293,7 +314,6 @@ export async function POST(request: NextRequest) {
             statusText: excelWriteResponse?.statusText,
             error: errorText,
           })
-          // Do not fail the entire request; return upload success with write error details
           excelWriteResult = {
             success: false,
             error: `Excel write failed: ${excelWriteResponse?.statusText || 'unknown'}`,
@@ -301,7 +321,6 @@ export async function POST(request: NextRequest) {
           }
         } else {
           const writeData = await excelWriteResponse.json()
-          // The Range PATCH returns a Range object; log address and values length
           const addr = writeData.address || writeData.addressLocal
           const v = writeData.values || []
           excelWriteResult = {
@@ -313,7 +332,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Attempt to close the workbook session if one was created
         if (workbookSessionId) {
           try {
             const closeResp = await fetch(

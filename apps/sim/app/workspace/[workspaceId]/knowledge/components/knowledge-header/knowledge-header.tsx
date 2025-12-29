@@ -1,21 +1,22 @@
 'use client'
 
-import { LibraryBig, MoreHorizontal } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createLogger } from '@sim/logger'
+import { AlertTriangle, ChevronDown, LibraryBig, MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
+import {
+  Button,
+  Popover,
+  PopoverContent,
+  PopoverItem,
+  PopoverTrigger,
+  Tooltip,
+} from '@/components/emcn'
 import { Trash } from '@/components/emcn/icons/trash'
-import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { WorkspaceSelector } from '@/app/workspace/[workspaceId]/knowledge/components'
-import {
-  commandListClass,
-  dropdownContentClass,
-  filterButtonClass,
-} from '@/app/workspace/[workspaceId]/knowledge/components/shared'
+import { filterButtonClass } from '@/app/workspace/[workspaceId]/knowledge/components/constants'
+import { useKnowledgeStore } from '@/stores/knowledge/store'
+
+const logger = createLogger('KnowledgeHeader')
 
 interface BreadcrumbItem {
   label: string
@@ -36,7 +37,7 @@ const HEADER_STYLES = {
 interface KnowledgeHeaderOptions {
   knowledgeBaseId?: string
   currentWorkspaceId?: string | null
-  onWorkspaceChange?: (workspaceId: string | null) => void
+  onWorkspaceChange?: (workspaceId: string | null) => void | Promise<void>
   onDeleteKnowledgeBase?: () => void
 }
 
@@ -45,7 +46,102 @@ interface KnowledgeHeaderProps {
   options?: KnowledgeHeaderOptions
 }
 
+interface Workspace {
+  id: string
+  name: string
+  permissions: 'admin' | 'write' | 'read'
+}
+
 export function KnowledgeHeader({ breadcrumbs, options }: KnowledgeHeaderProps) {
+  const { updateKnowledgeBase } = useKnowledgeStore()
+  const [isActionsPopoverOpen, setIsActionsPopoverOpen] = useState(false)
+  const [isWorkspacePopoverOpen, setIsWorkspacePopoverOpen] = useState(false)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false)
+  const [isUpdatingWorkspace, setIsUpdatingWorkspace] = useState(false)
+
+  // Fetch available workspaces
+  useEffect(() => {
+    if (!options?.knowledgeBaseId) return
+
+    const fetchWorkspaces = async () => {
+      try {
+        setIsLoadingWorkspaces(true)
+
+        const response = await fetch('/api/workspaces')
+        if (!response.ok) {
+          throw new Error('Failed to fetch workspaces')
+        }
+
+        const data = await response.json()
+
+        // Filter workspaces where user has write/admin permissions
+        const availableWorkspaces = data.workspaces
+          .filter((ws: any) => ws.permissions === 'write' || ws.permissions === 'admin')
+          .map((ws: any) => ({
+            id: ws.id,
+            name: ws.name,
+            permissions: ws.permissions,
+          }))
+
+        setWorkspaces(availableWorkspaces)
+      } catch (err) {
+        logger.error('Error fetching workspaces:', err)
+      } finally {
+        setIsLoadingWorkspaces(false)
+      }
+    }
+
+    fetchWorkspaces()
+  }, [options?.knowledgeBaseId])
+
+  const handleWorkspaceChange = async (workspaceId: string | null) => {
+    if (isUpdatingWorkspace || !options?.knowledgeBaseId) return
+
+    try {
+      setIsUpdatingWorkspace(true)
+      setIsWorkspacePopoverOpen(false)
+
+      const response = await fetch(`/api/knowledge/${options.knowledgeBaseId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspaceId,
+        }),
+      })
+
+      if (!response.ok) {
+        const result = await response.json()
+        throw new Error(result.error || 'Failed to update workspace')
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        logger.info(
+          `Knowledge base workspace updated: ${options.knowledgeBaseId} -> ${workspaceId}`
+        )
+
+        // Notify parent component of the change to refresh data
+        await options.onWorkspaceChange?.(workspaceId)
+
+        // Update the store after refresh to ensure consistency
+        updateKnowledgeBase(options.knowledgeBaseId, { workspaceId: workspaceId || undefined })
+      } else {
+        throw new Error(result.error || 'Failed to update workspace')
+      }
+    } catch (err) {
+      logger.error('Error updating workspace:', err)
+    } finally {
+      setIsUpdatingWorkspace(false)
+    }
+  }
+
+  const currentWorkspace = workspaces.find((ws) => ws.id === options?.currentWorkspaceId)
+  const hasWorkspace = !!options?.currentWorkspaceId
+
   return (
     <div className={HEADER_STYLES.container}>
       <div className={HEADER_STYLES.breadcrumbs}>
@@ -76,44 +172,94 @@ export function KnowledgeHeader({ breadcrumbs, options }: KnowledgeHeaderProps) 
         <div className={HEADER_STYLES.actionsContainer}>
           {/* Workspace Selector */}
           {options.knowledgeBaseId && (
-            <WorkspaceSelector
-              knowledgeBaseId={options.knowledgeBaseId}
-              currentWorkspaceId={options.currentWorkspaceId || null}
-              onWorkspaceChange={options.onWorkspaceChange}
-            />
+            <div className='flex items-center gap-2'>
+              {/* Warning icon for unassigned knowledge bases */}
+              {!hasWorkspace && (
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <AlertTriangle className='h-4 w-4 text-amber-500' />
+                  </Tooltip.Trigger>
+                  <Tooltip.Content side='top'>Not assigned to workspace</Tooltip.Content>
+                </Tooltip.Root>
+              )}
+
+              {/* Workspace selector dropdown */}
+              <Popover open={isWorkspacePopoverOpen} onOpenChange={setIsWorkspacePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant='outline'
+                    disabled={isLoadingWorkspaces || isUpdatingWorkspace}
+                    className={filterButtonClass}
+                  >
+                    <span className='truncate'>
+                      {isLoadingWorkspaces
+                        ? 'Loading...'
+                        : isUpdatingWorkspace
+                          ? 'Updating...'
+                          : currentWorkspace?.name || 'No workspace'}
+                    </span>
+                    <ChevronDown className='ml-2 h-4 w-4 text-muted-foreground' />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align='end' side='bottom' sideOffset={4}>
+                  {/* No workspace option */}
+                  <PopoverItem
+                    active={!options.currentWorkspaceId}
+                    showCheck
+                    onClick={() => handleWorkspaceChange(null)}
+                  >
+                    <span className='text-muted-foreground'>No workspace</span>
+                  </PopoverItem>
+
+                  {/* Available workspaces */}
+                  {workspaces.map((workspace) => (
+                    <PopoverItem
+                      key={workspace.id}
+                      active={options.currentWorkspaceId === workspace.id}
+                      showCheck
+                      onClick={() => handleWorkspaceChange(workspace.id)}
+                    >
+                      {workspace.name}
+                    </PopoverItem>
+                  ))}
+
+                  {workspaces.length === 0 && !isLoadingWorkspaces && (
+                    <PopoverItem disabled>
+                      <span className='text-muted-foreground text-xs'>
+                        No workspaces with write access
+                      </span>
+                    </PopoverItem>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </div>
           )}
 
           {/* Actions Menu */}
           {options.onDeleteKnowledgeBase && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover open={isActionsPopoverOpen} onOpenChange={setIsActionsPopoverOpen}>
+              <PopoverTrigger asChild>
                 <Button
                   variant='outline'
-                  size='sm'
                   className={filterButtonClass}
                   aria-label='Knowledge base actions menu'
                 >
                   <MoreHorizontal className='h-4 w-4' />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align='end'
-                side='bottom'
-                avoidCollisions={false}
-                sideOffset={4}
-                className={dropdownContentClass}
-              >
-                <div className={`${commandListClass} py-1`}>
-                  <DropdownMenuItem
-                    onClick={options.onDeleteKnowledgeBase}
-                    className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 font-[380] text-red-600 text-sm hover:bg-secondary/50 focus:bg-secondary/50 focus:text-red-600'
-                  >
-                    <Trash className='h-4 w-4' />
-                    Delete Knowledge Base
-                  </DropdownMenuItem>
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </PopoverTrigger>
+              <PopoverContent align='end' side='bottom' sideOffset={4}>
+                <PopoverItem
+                  onClick={() => {
+                    options.onDeleteKnowledgeBase?.()
+                    setIsActionsPopoverOpen(false)
+                  }}
+                  className='text-red-600 hover:text-red-600 focus:text-red-600'
+                >
+                  <Trash className='h-4 w-4' />
+                  <span>Delete Knowledge Base</span>
+                </PopoverItem>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
       )}

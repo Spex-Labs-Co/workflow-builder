@@ -1,13 +1,13 @@
 import { db } from '@sim/db'
 import { workflow, workflowFolder } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getUserEntityPermissions } from '@/lib/permissions/utils'
-import { generateRequestId } from '@/lib/utils'
-import { duplicateWorkflow } from '@/lib/workflows/duplicate'
+import { generateRequestId } from '@/lib/core/utils/request'
+import { duplicateWorkflow } from '@/lib/workflows/persistence/duplicate'
+import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'
 
 const logger = createLogger('FolderDuplicateAPI')
 

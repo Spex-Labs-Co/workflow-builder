@@ -35,6 +35,8 @@ export type GenerationType =
   | 'mongodb-sort'
   | 'mongodb-documents'
   | 'mongodb-update'
+  | 'neo4j-cypher'
+  | 'neo4j-parameters'
 
 export type SubBlockType =
   | 'short-input' // Single line input
@@ -53,10 +55,11 @@ export type SubBlockType =
   | 'time-input' // Time input
   | 'oauth-input' // OAuth credential selector
   | 'webhook-config' // Webhook configuration
-  | 'schedule-save' // Schedule save button with status display
+  | 'schedule-info' // Schedule status display (next run, last ran, failure badge)
   | 'file-selector' // File selector for Google Drive, etc.
   | 'project-selector' // Project selector for Jira, Discord, etc.
   | 'channel-selector' // Channel selector for Slack, Discord, etc.
+  | 'user-selector' // User selector for Slack, etc.
   | 'folder-selector' // Folder selector for Gmail, etc.
   | 'knowledge-base-selector' // Knowledge base selector
   | 'knowledge-tag-filters' // Multiple tag filters for knowledge bases
@@ -71,6 +74,9 @@ export type SubBlockType =
   | 'file-upload' // File uploader
   | 'input-mapping' // Map parent variables to child workflow input schema
   | 'variables-input' // Variable assignments for updating workflow variables
+  | 'messages-input' // Multiple message inputs with role and content for LLM message history
+  | 'workflow-selector' // Workflow selector for agent tools
+  | 'workflow-input-mapper' // Dynamic workflow input mapper based on selected workflow
   | 'text' // Read-only text display
 
 /**
@@ -80,12 +86,16 @@ export type SubBlockType =
 export const SELECTOR_TYPES_HYDRATION_REQUIRED: SubBlockType[] = [
   'oauth-input',
   'channel-selector',
+  'user-selector',
   'file-selector',
   'folder-selector',
   'project-selector',
   'knowledge-base-selector',
+  'workflow-selector',
   'document-selector',
   'variables-input',
+  'mcp-server-selector',
+  'mcp-tool-selector',
 ] as const
 
 export type ExtractToolOutput<T> = T extends ToolResponse ? T['output'] : never
@@ -108,9 +118,33 @@ export type BlockOutput =
   | PrimitiveValueType
   | { [key: string]: PrimitiveValueType | Record<string, any> }
 
+/**
+ * Condition for showing an output field.
+ * Uses the same pattern as SubBlockConfig.condition
+ */
+export interface OutputCondition {
+  field: string
+  value: string | number | boolean | Array<string | number | boolean>
+  not?: boolean
+  and?: {
+    field: string
+    value: string | number | boolean | Array<string | number | boolean> | undefined
+    not?: boolean
+  }
+}
+
 export type OutputFieldDefinition =
   | PrimitiveValueType
-  | { type: PrimitiveValueType; description?: string }
+  | {
+      type: PrimitiveValueType
+      description?: string
+      /**
+       * Optional condition for when this output should be shown.
+       * If not specified, the output is always shown.
+       * Uses the same condition format as subBlocks.
+       */
+      condition?: OutputCondition
+    }
 
 export interface ParamConfig {
   type: ParamType
@@ -210,12 +244,11 @@ export interface SubBlockConfig {
         }
       })
   // Props specific to 'code' sub-block type
-  language?: 'javascript' | 'json'
+  language?: 'javascript' | 'json' | 'python'
   generationType?: GenerationType
   collapsible?: boolean // Whether the code block can be collapsed
   defaultCollapsed?: boolean // Whether the code block is collapsed by default
-  // OAuth specific properties
-  provider?: string
+  // OAuth specific properties - serviceId is the canonical identifier for OAuth services
   serviceId?: string
   requiredScopes?: string[]
   // File selector specific properties
@@ -231,6 +264,8 @@ export interface SubBlockConfig {
   rows?: number
   // Multi-select functionality
   multiSelect?: boolean
+  // Combobox specific: Enable search input in dropdown
+  searchable?: boolean
   // Wand configuration for AI assistance
   wandConfig?: {
     enabled: boolean
@@ -239,9 +274,15 @@ export interface SubBlockConfig {
     placeholder?: string // Custom placeholder for the prompt input
     maintainHistory?: boolean // Whether to maintain conversation history
   }
-  // Declarative dependency hints for cross-field clearing or invalidation
-  // Example: dependsOn: ['credential'] means this field should be cleared when credential changes
-  dependsOn?: string[]
+  /**
+   * Declarative dependency hints for cross-field clearing or invalidation.
+   * Supports two formats:
+   * - Simple array: `['credential']` - all fields must have values (AND logic)
+   * - Object with all/any: `{ all: ['authMethod'], any: ['credential', 'botToken'] }`
+   *   - `all`: all listed fields must have values (AND logic)
+   *   - `any`: at least one field must have a value (OR logic)
+   */
+  dependsOn?: string[] | { all?: string[]; any?: string[] }
   // Copyable-text specific: Use webhook URL from webhook management hook
   useWebhookUrl?: boolean
   // Trigger-save specific: The trigger ID for validation and saving

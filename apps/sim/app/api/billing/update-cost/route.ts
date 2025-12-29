@@ -1,19 +1,23 @@
 import { db } from '@sim/db'
 import { userStats } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq, sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { logModelUsage } from '@/lib/billing/core/usage-log'
 import { checkAndBillOverageThreshold } from '@/lib/billing/threshold-billing'
 import { checkInternalApiKey } from '@/lib/copilot/utils'
-import { isBillingEnabled } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
-import { generateRequestId } from '@/lib/utils'
+import { isBillingEnabled } from '@/lib/core/config/feature-flags'
+import { generateRequestId } from '@/lib/core/utils/request'
 
 const logger = createLogger('BillingUpdateCostAPI')
 
 const UpdateCostSchema = z.object({
   userId: z.string().min(1, 'User ID is required'),
   cost: z.number().min(0, 'Cost must be a non-negative number'),
+  model: z.string().min(1, 'Model is required'),
+  inputTokens: z.number().min(0).default(0),
+  outputTokens: z.number().min(0).default(0),
 })
 
 /**
@@ -71,11 +75,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { userId, cost } = validation.data
+    const { userId, cost, model, inputTokens, outputTokens } = validation.data
 
     logger.info(`[${requestId}] Processing cost update`, {
       userId,
       cost,
+      model,
     })
 
     // Check if user stats record exists (same as ExecutionLogger)
@@ -90,11 +95,10 @@ export async function POST(req: NextRequest) {
       )
       return NextResponse.json({ error: 'User stats record not found' }, { status: 500 })
     }
-    // Update existing user stats record
+
     const updateFields = {
       totalCost: sql`total_cost + ${cost}`,
       currentPeriodCost: sql`current_period_cost + ${cost}`,
-      // Copilot usage tracking increments
       totalCopilotCost: sql`total_copilot_cost + ${cost}`,
       currentPeriodCopilotCost: sql`current_period_copilot_cost + ${cost}`,
       totalCopilotCalls: sql`total_copilot_calls + 1`,
@@ -106,6 +110,16 @@ export async function POST(req: NextRequest) {
     logger.info(`[${requestId}] Updated user stats record`, {
       userId,
       addedCost: cost,
+    })
+
+    // Log usage for complete audit trail
+    await logModelUsage({
+      userId,
+      source: 'copilot',
+      model,
+      inputTokens,
+      outputTokens,
+      cost,
     })
 
     // Check if user has hit overage threshold and bill incrementally

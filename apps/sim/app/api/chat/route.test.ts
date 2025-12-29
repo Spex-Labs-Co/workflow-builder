@@ -42,7 +42,7 @@ describe('Chat API Route', () => {
       workflow: { id: 'id', userId: 'userId', isDeployed: 'isDeployed' },
     }))
 
-    vi.doMock('@/lib/logs/console/logger', () => ({
+    vi.doMock('@sim/logger', () => ({
       createLogger: vi.fn().mockReturnValue({
         info: vi.fn(),
         error: vi.fn(),
@@ -66,7 +66,7 @@ describe('Chat API Route', () => {
       }),
     }))
 
-    vi.doMock('@/lib/utils', () => ({
+    vi.doMock('@/lib/core/security/encryption', () => ({
       encryptSecret: mockEncryptSecret.mockResolvedValue({ encrypted: 'encrypted-password' }),
     }))
 
@@ -78,7 +78,7 @@ describe('Chat API Route', () => {
       checkWorkflowAccessForChatCreation: mockCheckWorkflowAccessForChatCreation,
     }))
 
-    vi.doMock('@/lib/workflows/db-helpers', () => ({
+    vi.doMock('@/lib/workflows/persistence/utils', () => ({
       deployWorkflow: mockDeployWorkflow.mockResolvedValue({
         success: true,
         version: 1,
@@ -249,7 +249,7 @@ describe('Chat API Route', () => {
         }),
       }))
 
-      vi.doMock('@/lib/env', () => ({
+      vi.doMock('@/lib/core/config/env', () => ({
         env: {
           NODE_ENV: 'development',
           NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
@@ -296,7 +296,7 @@ describe('Chat API Route', () => {
         }),
       }))
 
-      vi.doMock('@/lib/env', () => ({
+      vi.doMock('@/lib/core/config/env', () => ({
         env: {
           NODE_ENV: 'development',
           NEXT_PUBLIC_APP_URL: 'http://localhost:3000',

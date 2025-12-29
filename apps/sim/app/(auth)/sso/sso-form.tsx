@@ -1,18 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { client } from '@/lib/auth-client'
-import { quickValidateEmail } from '@/lib/email/validation'
-import { env, isFalsy } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
-import { cn } from '@/lib/utils'
-import { inter } from '@/app/fonts/inter/inter'
-import { soehne } from '@/app/fonts/soehne/soehne'
+import { client } from '@/lib/auth/auth-client'
+import { env, isFalsy } from '@/lib/core/config/env'
+import { cn } from '@/lib/core/utils/cn'
+import { quickValidateEmail } from '@/lib/messaging/email/validation'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { soehne } from '@/app/_styles/fonts/soehne/soehne'
 
 const logger = createLogger('SSOForm')
 

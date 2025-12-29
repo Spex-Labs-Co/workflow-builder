@@ -1,6 +1,6 @@
+import { createLogger } from '@sim/logger'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { isHosted } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
+import { isHosted } from '@/lib/core/config/feature-flags'
 
 const logger = createLogger('CopilotKeysQuery')
 
@@ -18,6 +18,9 @@ export const copilotKeysKeys = {
 export interface CopilotKey {
   id: string
   displayKey: string // "•••••{last6}"
+  name: string | null
+  createdAt: string | null
+  lastUsed: string | null
 }
 
 /**
@@ -47,16 +50,22 @@ async function fetchCopilotKeys(): Promise<CopilotKey[]> {
 
 /**
  * Hook to fetch Copilot API keys
- * Only fetches when in hosted environment
  */
 export function useCopilotKeys() {
   return useQuery({
     queryKey: copilotKeysKeys.keys(),
     queryFn: fetchCopilotKeys,
-    enabled: isHosted, // Only fetch in hosted environments
+    enabled: isHosted,
     staleTime: 30 * 1000, // 30 seconds
     placeholderData: keepPreviousData,
   })
+}
+
+/**
+ * Generate key params
+ */
+interface GenerateKeyParams {
+  name: string
 }
 
 /**
@@ -66,12 +75,13 @@ export function useGenerateCopilotKey() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (): Promise<GenerateKeyResponse> => {
+    mutationFn: async ({ name }: GenerateKeyParams): Promise<GenerateKeyResponse> => {
       const response = await fetch('/api/copilot/api-keys/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ name }),
       })
 
       if (!response.ok) {
@@ -82,11 +92,9 @@ export function useGenerateCopilotKey() {
       return response.json()
     },
     onSuccess: () => {
-      // Force refetch even if query is disabled (enabled: isHosted check)
-      // Using refetchQueries ensures it runs regardless of enabled state
       queryClient.refetchQueries({
         queryKey: copilotKeysKeys.keys(),
-        type: 'active', // Only refetch if query is currently subscribed/active
+        type: 'active',
       })
     },
     onError: (error) => {
@@ -119,13 +127,10 @@ export function useDeleteCopilotKey() {
       return response.json()
     },
     onMutate: async ({ keyId }) => {
-      // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: copilotKeysKeys.keys() })
 
-      // Snapshot the previous value
       const previousKeys = queryClient.getQueryData<CopilotKey[]>(copilotKeysKeys.keys())
 
-      // Optimistically remove the key from the list
       queryClient.setQueryData<CopilotKey[]>(copilotKeysKeys.keys(), (old) => {
         return old?.filter((k) => k.id !== keyId) || []
       })
@@ -133,14 +138,12 @@ export function useDeleteCopilotKey() {
       return { previousKeys }
     },
     onError: (error, _variables, context) => {
-      // Rollback to previous value on error
       if (context?.previousKeys) {
         queryClient.setQueryData(copilotKeysKeys.keys(), context.previousKeys)
       }
       logger.error('Failed to delete Copilot API key:', error)
     },
     onSettled: () => {
-      // Always refetch after error or success to ensure server state
       queryClient.invalidateQueries({ queryKey: copilotKeysKeys.keys() })
     },
   })

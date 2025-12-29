@@ -12,52 +12,54 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 
 ## Instrucciones de uso
 
-Integra la Memoria en el flujo de trabajo. Puede añadir, obtener una memoria, obtener todas las memorias y eliminar memorias.
+Integra memoria en el flujo de trabajo. Puede añadir, obtener una memoria, obtener todas las memorias y eliminar memorias.
 
 ## Herramientas
 
 ### `memory_add`
 
-Añade una nueva memoria a la base de datos o agrega a una memoria existente con el mismo ID.
+Añadir una nueva memoria a la base de datos o agregar a una memoria existente con el mismo ID.
 
 #### Entrada
 
 | Parámetro | Tipo | Obligatorio | Descripción |
 | --------- | ---- | ----------- | ----------- |
-| `id` | string | Sí | Identificador para la memoria. Si ya existe una memoria con este ID, los nuevos datos se añadirán a ella. |
-| `role` | string | Sí | Rol para la memoria del agente \(usuario, asistente o sistema\) |
+| `conversationId` | string | No | Identificador de conversación \(ej., user-123, session-abc\). Si ya existe una memoria con este conversationId, el nuevo mensaje se agregará a ella. |
+| `id` | string | No | Parámetro heredado para identificador de conversación. Usa conversationId en su lugar. Proporcionado para compatibilidad con versiones anteriores. |
+| `role` | string | Sí | Rol para la memoria del agente \(user, assistant o system\) |
 | `content` | string | Sí | Contenido para la memoria del agente |
 
 #### Salida
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
-| `success` | boolean | Indica si la memoria se añadió correctamente |
+| `success` | boolean | Si la memoria se añadió correctamente |
 | `memories` | array | Array de objetos de memoria incluyendo la memoria nueva o actualizada |
 | `error` | string | Mensaje de error si la operación falló |
 
 ### `memory_get`
 
-Recuperar una memoria específica por su ID
+Recuperar memoria por conversationId. Devuelve las memorias coincidentes.
 
 #### Entrada
 
 | Parámetro | Tipo | Obligatorio | Descripción |
 | --------- | ---- | ----------- | ----------- |
-| `id` | string | Sí | Identificador de la memoria a recuperar |
+| `conversationId` | string | No | Identificador de conversación \(ej., user-123, session-abc\). Devuelve las memorias para esta conversación. |
+| `id` | string | No | Parámetro heredado para identificador de conversación. Usa conversationId en su lugar. Proporcionado para compatibilidad con versiones anteriores. |
 
 #### Salida
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
-| `success` | boolean | Indica si la memoria se recuperó correctamente |
-| `memories` | array | Array de datos de memoria para el ID solicitado |
+| `success` | boolean | Si la memoria se recuperó exitosamente |
+| `memories` | array | Array de objetos de memoria con campos conversationId y data |
 | `message` | string | Mensaje de éxito o error |
 | `error` | string | Mensaje de error si la operación falló |
 
 ### `memory_get_all`
 
-Recuperar todas las memorias de la base de datos
+Recupera todas las memorias de la base de datos
 
 #### Entrada
 
@@ -68,26 +70,27 @@ Recuperar todas las memorias de la base de datos
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
-| `success` | boolean | Indica si todas las memorias se recuperaron correctamente |
-| `memories` | array | Array de todos los objetos de memoria con claves, tipos y datos |
+| `success` | boolean | Si todas las memorias se recuperaron exitosamente |
+| `memories` | array | Array de todos los objetos de memoria con campos key, conversationId y data |
 | `message` | string | Mensaje de éxito o error |
 | `error` | string | Mensaje de error si la operación falló |
 
 ### `memory_delete`
 
-Eliminar una memoria específica por su ID
+Elimina memorias por conversationId.
 
 #### Entrada
 
 | Parámetro | Tipo | Obligatorio | Descripción |
 | --------- | ---- | ----------- | ----------- |
-| `id` | string | Sí | Identificador de la memoria a eliminar |
+| `conversationId` | string | No | Identificador de conversación (ej., user-123, session-abc). Elimina todas las memorias de esta conversación. |
+| `id` | string | No | Parámetro heredado para identificador de conversación. Usa conversationId en su lugar. Proporcionado para compatibilidad con versiones anteriores. |
 
 #### Salida
 
 | Parámetro | Tipo | Descripción |
 | --------- | ---- | ----------- |
-| `success` | boolean | Si la memoria fue eliminada con éxito |
+| `success` | boolean | Si la memoria se eliminó exitosamente |
 | `message` | string | Mensaje de éxito o error |
 | `error` | string | Mensaje de error si la operación falló |
 

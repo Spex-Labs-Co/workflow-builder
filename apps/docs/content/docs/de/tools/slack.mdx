@@ -54,7 +54,7 @@ Integriert Slack in den Workflow. Kann Nachrichten senden, aktualisieren und lö
 
 ### `slack_message`
 
-Senden Sie Nachrichten an Slack-Kanäle oder Benutzer über die Slack-API. Unterstützt Slack mrkdwn-Formatierung.
+Sende Nachrichten an Slack-Kanäle oder Direktnachrichten. Unterstützt Slack mrkdwn-Formatierung.
 
 #### Eingabe
 
@@ -62,8 +62,9 @@ Senden Sie Nachrichten an Slack-Kanäle oder Benutzer über die Slack-API. Unter
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
 | `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
-| `channel` | string | Ja | Ziel-Slack-Kanal \(z.B. #general\) |
-| `text` | string | Ja | Nachrichtentext zum Senden \(unterstützt Slack mrkdwn-Formatierung\) |
+| `channel` | string | Nein | Ziel-Slack-Kanal \(z.B. #general\) |
+| `userId` | string | Nein | Ziel-Slack-Benutzer-ID für Direktnachrichten \(z.B. U1234567890\) |
+| `text` | string | Ja | Zu sendender Nachrichtentext \(unterstützt Slack mrkdwn-Formatierung\) |
 | `thread_ts` | string | Nein | Thread-Zeitstempel für Antworten \(erstellt Thread-Antwort\) |
 | `files` | file[] | Nein | Dateien, die an die Nachricht angehängt werden sollen |
 
@@ -71,8 +72,10 @@ Senden Sie Nachrichten an Slack-Kanäle oder Benutzer über die Slack-API. Unter
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
-| `ts` | string | Zeitstempel der Nachricht |
-| `channel` | string | Kanal-ID, wohin die Nachricht gesendet wurde |
+| `message` | object | Vollständiges Nachrichtenobjekt mit allen von Slack zurückgegebenen Eigenschaften |
+| `ts` | string | Nachrichtenzeitstempel |
+| `channel` | string | Kanal-ID, in dem die Nachricht gesendet wurde |
+| `fileCount` | number | Anzahl der hochgeladenen Dateien \(wenn Dateien angehängt sind\) |
 
 ### `slack_canvas`
 
@@ -106,17 +109,94 @@ Lesen Sie die neuesten Nachrichten aus Slack-Kanälen. Rufen Sie den Konversatio
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
-| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
-| `channel` | string | Ja | Slack-Kanal, aus dem Nachrichten gelesen werden sollen (z.B. #general) |
-| `limit` | number | Nein | Anzahl der abzurufenden Nachrichten (Standard: 10, max: 100) |
-| `oldest` | string | Nein | Beginn des Zeitraums (Zeitstempel) |
-| `latest` | string | Nein | Ende des Zeitraums (Zeitstempel) |
+| `botToken` | string | Nein | Bot-Token für Custom Bot |
+| `channel` | string | Nein | Slack-Kanal, aus dem Nachrichten gelesen werden sollen \(z.B. #general\) |
+| `userId` | string | Nein | Benutzer-ID für DM-Konversation \(z.B. U1234567890\) |
+| `limit` | number | Nein | Anzahl der abzurufenden Nachrichten \(Standard: 10, max: 15\) |
+| `oldest` | string | Nein | Beginn des Zeitbereichs \(Zeitstempel\) |
+| `latest` | string | Nein | Ende des Zeitbereichs \(Zeitstempel\) |
 
 #### Ausgabe
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
 | `messages` | array | Array von Nachrichtenobjekten aus dem Kanal |
+
+### `slack_list_channels`
+
+Listet alle Kanäle in einem Slack-Workspace auf. Gibt öffentliche und private Kanäle zurück, auf die der Bot Zugriff hat.
+
+#### Eingabe
+
+| Parameter | Typ | Erforderlich | Beschreibung |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
+| `includePrivate` | boolean | Nein | Private Kanäle einschließen, in denen der Bot Mitglied ist \(Standard: true\) |
+| `excludeArchived` | boolean | Nein | Archivierte Kanäle ausschließen \(Standard: true\) |
+| `limit` | number | Nein | Maximale Anzahl der zurückzugebenden Kanäle \(Standard: 100, max: 200\) |
+
+#### Ausgabe
+
+| Parameter | Typ | Beschreibung |
+| --------- | ---- | ----------- |
+| `channels` | array | Array von Kanalobjekten aus dem Workspace |
+
+### `slack_list_members`
+
+Listet alle Mitglieder (Benutzer-IDs) in einem Slack-Kanal auf. Verwenden Sie diese Funktion mit Get User Info, um IDs in Namen aufzulösen.
+
+#### Eingabe
+
+| Parameter | Typ | Erforderlich | Beschreibung |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
+| `channel` | string | Ja | Kanal-ID, aus der Mitglieder aufgelistet werden sollen |
+| `limit` | number | Nein | Maximale Anzahl der zurückzugebenden Mitglieder \(Standard: 100, max: 200\) |
+
+#### Ausgabe
+
+| Parameter | Typ | Beschreibung |
+| --------- | ---- | ----------- |
+| `members` | array | Array von Benutzer-IDs, die Mitglieder des Kanals sind \(z.B. U1234567890\) |
+
+### `slack_list_users`
+
+Listet alle Benutzer in einem Slack-Workspace auf. Gibt Benutzerprofile mit Namen und Avataren zurück.
+
+#### Eingabe
+
+| Parameter | Typ | Erforderlich | Beschreibung |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
+| `includeDeleted` | boolean | Nein | Deaktivierte/gelöschte Benutzer einbeziehen \(Standard: false\) |
+| `limit` | number | Nein | Maximale Anzahl der zurückzugebenden Benutzer \(Standard: 100, max: 200\) |
+
+#### Ausgabe
+
+| Parameter | Typ | Beschreibung |
+| --------- | ---- | ----------- |
+| `users` | array | Array von Benutzerobjekten aus dem Workspace |
+
+### `slack_get_user`
+
+Ruft detaillierte Informationen über einen bestimmten Slack-Benutzer anhand seiner Benutzer-ID ab.
+
+#### Eingabe
+
+| Parameter | Typ | Erforderlich | Beschreibung |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
+| `userId` | string | Ja | Zu suchende Benutzer-ID \(z.B. U1234567890\) |
+
+#### Ausgabe
+
+| Parameter | Typ | Beschreibung |
+| --------- | ---- | ----------- |
+| `user` | object | Detaillierte Benutzerinformationen |
 
 ### `slack_download`
 
@@ -146,7 +226,7 @@ Eine zuvor vom Bot in Slack gesendete Nachricht aktualisieren
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
-| `botToken` | string | Nein | Bot-Token für Custom Bot |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
 | `channel` | string | Ja | Kanal-ID, in dem die Nachricht gepostet wurde \(z.B. C1234567890\) |
 | `timestamp` | string | Ja | Zeitstempel der zu aktualisierenden Nachricht \(z.B. 1405894322.002768\) |
 | `text` | string | Ja | Neuer Nachrichtentext \(unterstützt Slack mrkdwn-Formatierung\) |
@@ -155,8 +235,9 @@ Eine zuvor vom Bot in Slack gesendete Nachricht aktualisieren
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
+| `message` | object | Vollständiges aktualisiertes Nachrichtenobjekt mit allen von Slack zurückgegebenen Eigenschaften |
 | `content` | string | Erfolgsmeldung |
-| `metadata` | object | Metadaten der aktualisierten Nachricht |
+| `metadata` | object | Aktualisierte Nachrichtenmetadaten |
 
 ### `slack_delete_message`
 
@@ -167,7 +248,7 @@ Eine zuvor vom Bot in Slack gesendete Nachricht löschen
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | Nein | Authentifizierungsmethode: oauth oder bot_token |
-| `botToken` | string | Nein | Bot-Token für Custom Bot |
+| `botToken` | string | Nein | Bot-Token für benutzerdefinierten Bot |
 | `channel` | string | Ja | Kanal-ID, in dem die Nachricht gepostet wurde \(z.B. C1234567890\) |
 | `timestamp` | string | Ja | Zeitstempel der zu löschenden Nachricht \(z.B. 1405894322.002768\) |
 
@@ -180,7 +261,7 @@ Eine zuvor vom Bot in Slack gesendete Nachricht löschen
 
 ### `slack_add_reaction`
 
-Emoji-Reaktion zu einer Slack-Nachricht hinzufügen
+Eine Emoji-Reaktion zu einer Slack-Nachricht hinzufügen
 
 #### Eingabe
 

@@ -2,11 +2,12 @@ import { memo, useMemo, useRef } from 'react'
 import { RepeatIcon, SplitIcon } from 'lucide-react'
 import { Handle, type NodeProps, Position, useReactFlow } from 'reactflow'
 import { Button, Trash } from '@/components/emcn'
-import { cn } from '@/lib/utils'
+import { cn } from '@/lib/core/utils/cn'
+import { HANDLE_POSITIONS } from '@/lib/workflows/blocks/block-dimensions'
 import { type DiffStatus, hasDiffStatus } from '@/lib/workflows/diff/types'
 import { useCurrentWorkflow } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
 import { useCollaborativeWorkflow } from '@/hooks/use-collaborative-workflow'
-import { usePanelEditorStore } from '@/stores/panel-new/editor/store'
+import { usePanelEditorStore } from '@/stores/panel/editor/store'
 
 /**
  * Global styles for subflow nodes (loop and parallel containers).
@@ -25,7 +26,7 @@ const SubflowNodeStyles: React.FC = () => {
       /* Drag-over states */
       .loop-node-drag-over,
       .parallel-node-drag-over {
-        box-shadow: 0 0 0 1.75px #33B4FF !important;
+        box-shadow: 0 0 0 1.75px var(--brand-secondary) !important;
         border-radius: 8px !important;
       }
 
@@ -107,19 +108,19 @@ export const SubflowNodeComponent = memo(({ data, id }: NodeProps<SubflowNodeDat
    */
   const getHandleClasses = (position: 'left' | 'right') => {
     const baseClasses = '!z-[10] !cursor-crosshair !border-none !transition-[colors] !duration-150'
-    const colorClasses = '!bg-[var(--surface-12)]'
+    const colorClasses = '!bg-[var(--workflow-edge)]'
 
     const positionClasses = {
-      left: '!left-[-7px] !h-5 !w-[7px] !rounded-l-[2px] !rounded-r-none hover:!left-[-10px] hover:!w-[10px] hover:!rounded-l-full',
+      left: '!left-[-8px] !h-5 !w-[7px] !rounded-l-[2px] !rounded-r-none hover:!left-[-11px] hover:!w-[10px] hover:!rounded-l-full',
       right:
-        '!right-[-7px] !h-5 !w-[7px] !rounded-r-[2px] !rounded-l-none hover:!right-[-10px] hover:!w-[10px] hover:!rounded-r-full',
+        '!right-[-8px] !h-5 !w-[7px] !rounded-r-[2px] !rounded-l-none hover:!right-[-11px] hover:!w-[10px] hover:!rounded-r-full',
     }
 
     return cn(baseClasses, colorClasses, positionClasses[position])
   }
 
   const getHandleStyle = () => {
-    return { top: '20px', transform: 'translateY(-50%)' }
+    return { top: `${HANDLE_POSITIONS.DEFAULT_Y_OFFSET}px`, transform: 'translateY(-50%)' }
   }
 
   /**
@@ -143,7 +144,7 @@ export const SubflowNodeComponent = memo(({ data, id }: NodeProps<SubflowNodeDat
           ref={blockRef}
           onClick={() => setCurrentBlockId(id)}
           className={cn(
-            'relative cursor-pointer select-none rounded-[8px] border border-[var(--divider)]',
+            'relative cursor-pointer select-none rounded-[8px] border border-[var(--border)]',
             'transition-block-bg transition-ring',
             'z-[20]'
           )}
@@ -161,7 +162,7 @@ export const SubflowNodeComponent = memo(({ data, id }: NodeProps<SubflowNodeDat
           {/* Header Section */}
           <div
             className={cn(
-              'workflow-drag-handle flex cursor-grab items-center justify-between rounded-t-[8px] border-[var(--divider)] border-b bg-[var(--surface-2)] py-[8px] pr-[12px] pl-[8px] dark:bg-[var(--surface-2)] [&:active]:cursor-grabbing'
+              'workflow-drag-handle flex cursor-grab items-center justify-between rounded-t-[8px] border-[var(--border)] border-b bg-[var(--surface-2)] py-[8px] pr-[12px] pl-[8px] [&:active]:cursor-grabbing'
             )}
             onMouseDown={(e) => {
               e.stopPropagation()
@@ -204,19 +205,18 @@ export const SubflowNodeComponent = memo(({ data, id }: NodeProps<SubflowNodeDat
             data-dragarea='true'
             style={{
               position: 'relative',
-              minHeight: '100%',
               pointerEvents: isPreview ? 'none' : 'auto',
             }}
           >
             {/* Subflow Start */}
             <div
-              className='absolute top-[16px] left-[16px] flex items-center justify-center rounded-[8px] bg-[var(--surface-2)] px-[12px] py-[6px]'
+              className='absolute top-[16px] left-[16px] flex items-center justify-center rounded-[8px] border border-[var(--border-1)] bg-[var(--surface-2)] px-[12px] py-[6px]'
               style={{ pointerEvents: isPreview ? 'none' : 'auto' }}
               data-parent-id={id}
               data-node-role={`${data.kind}-start`}
               data-extent='parent'
             >
-              <span className='font-medium text-[14px] text-white'>Start</span>
+              <span className='font-medium text-[14px] text-[var(--text-primary)]'>Start</span>
 
               <Handle
                 type='source'

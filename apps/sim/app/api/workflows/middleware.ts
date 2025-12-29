@@ -1,11 +1,11 @@
+import { createLogger } from '@sim/logger'
 import type { NextRequest } from 'next/server'
 import {
   type ApiKeyAuthResult,
   authenticateApiKeyFromHeader,
   updateApiKeyLastUsed,
 } from '@/lib/api-key/service'
-import { env } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
+import { env } from '@/lib/core/config/env'
 import { getWorkflowById } from '@/lib/workflows/utils'
 
 const logger = createLogger('WorkflowMiddleware')
@@ -42,7 +42,7 @@ export async function validateWorkflowAccess(
       }
 
       const internalSecret = request.headers.get('X-Internal-Secret')
-      if (internalSecret === env.INTERNAL_API_SECRET) {
+      if (env.INTERNAL_API_SECRET && internalSecret === env.INTERNAL_API_SECRET) {
         return { workflow }
       }
 

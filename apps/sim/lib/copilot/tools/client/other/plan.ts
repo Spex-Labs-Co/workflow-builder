@@ -1,10 +1,10 @@
+import { createLogger } from '@sim/logger'
 import { ListTodo, Loader2, X, XCircle } from 'lucide-react'
 import {
   BaseClientTool,
   type BaseClientToolMetadata,
   ClientToolCallState,
 } from '@/lib/copilot/tools/client/base-tool'
-import { createLogger } from '@/lib/logs/console/logger'
 
 interface PlanArgs {
   objective?: string
@@ -45,7 +45,7 @@ export class PlanClientTool extends BaseClientTool {
             completed: false,
             executing: false,
           }))
-          const { useCopilotStore } = await import('@/stores/panel-new/copilot/store')
+          const { useCopilotStore } = await import('@/stores/panel/copilot/store')
           const store = useCopilotStore.getState()
           if (store.setPlanTodos) {
             store.setPlanTodos(todos)

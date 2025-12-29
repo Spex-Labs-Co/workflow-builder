@@ -1,15 +1,15 @@
 'use client'
 
 import { type KeyboardEvent, useEffect, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createLogger } from '@/lib/logs/console/logger'
-import { cn } from '@/lib/utils'
+import { cn } from '@/lib/core/utils/cn'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { soehne } from '@/app/_styles/fonts/soehne/soehne'
 import Nav from '@/app/(landing)/components/nav/nav'
-import { inter } from '@/app/fonts/inter/inter'
-import { soehne } from '@/app/fonts/soehne/soehne'
 
 const logger = createLogger('PasswordAuth')
 

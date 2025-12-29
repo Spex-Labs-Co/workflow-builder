@@ -1,6 +1,6 @@
-import { isTest } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getBaseUrl } from '@/lib/urls/utils'
+import { createLogger } from '@sim/logger'
+import { isTest } from '@/lib/core/config/feature-flags'
+import { getBaseUrl } from '@/lib/core/utils/urls'
 import type { TableRow } from '@/tools/types'
 
 const logger = createLogger('HTTPRequestUtils')

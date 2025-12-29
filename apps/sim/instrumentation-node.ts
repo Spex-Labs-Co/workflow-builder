@@ -3,8 +3,8 @@
  */
 
 import { DiagConsoleLogger, DiagLogLevel, diag } from '@opentelemetry/api'
-import { env } from './lib/env'
-import { createLogger } from './lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
+import { env } from './lib/core/config/env'
 
 diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR)
 
@@ -59,7 +59,8 @@ async function initializeOpenTelemetry() {
     const exporter = new OTLPTraceExporter({
       url: telemetryConfig.endpoint,
       headers: {},
-      timeoutMillis: telemetryConfig.batchSettings.exportTimeoutMillis,
+      timeoutMillis: Math.min(telemetryConfig.batchSettings.exportTimeoutMillis, 10000), // Max 10s
+      keepAlive: false,
     })
 
     const spanProcessor = new BatchSpanProcessor(exporter, {

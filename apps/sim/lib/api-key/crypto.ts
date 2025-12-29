@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
-import { env } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
+import { env } from '@/lib/core/config/env'
 
 const logger = createLogger('ApiKeyCrypto')
 

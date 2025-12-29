@@ -1,8 +1,14 @@
+import { createLogger } from '@sim/logger'
 import { create } from 'zustand'
 import { devtools, persist } from 'zustand/middleware'
-import { redactApiKeys } from '@/lib/utils'
+import { redactApiKeys } from '@/lib/core/security/redaction'
 import type { NormalizedBlockOutput } from '@/executor/types'
-import type { ConsoleEntry, ConsoleStore, ConsoleUpdate } from './types'
+import { useExecutionStore } from '@/stores/execution/store'
+import { useNotificationStore } from '@/stores/notifications'
+import { useGeneralStore } from '@/stores/settings/general/store'
+import type { ConsoleEntry, ConsoleStore, ConsoleUpdate } from '@/stores/terminal/console/types'
+
+const logger = createLogger('TerminalConsoleStore')
 
 /**
  * Updates a NormalizedBlockOutput with new content
@@ -74,7 +80,7 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
               return { entries: state.entries }
             }
 
-            // Redact API keys from output
+            // Redact API keys from output and input
             const redactedEntry = { ...entry }
             if (
               !isStreamingOutput(entry.output) &&
@@ -82,6 +88,9 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
               typeof redactedEntry.output === 'object'
             ) {
               redactedEntry.output = redactApiKeys(redactedEntry.output)
+            }
+            if (redactedEntry.input && typeof redactedEntry.input === 'object') {
+              redactedEntry.input = redactApiKeys(redactedEntry.input)
             }
 
             // Create new entry with ID and timestamp
@@ -94,21 +103,56 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
             return { entries: [newEntry, ...state.entries] }
           })
 
-          return get().entries[0]
+          const newEntry = get().entries[0]
+
+          // Surface error notifications immediately when error entries are added
+          // Only show if error notifications are enabled in settings
+          if (newEntry?.error) {
+            const { isErrorNotificationsEnabled } = useGeneralStore.getState()
+
+            if (isErrorNotificationsEnabled) {
+              try {
+                const errorMessage = String(newEntry.error)
+                const blockName = newEntry.blockName || 'Unknown Block'
+
+                // Copilot message includes block name for better debugging context
+                const copilotMessage = `${errorMessage}\n\nError in ${blockName}.\n\nPlease fix this.`
+
+                useNotificationStore.getState().addNotification({
+                  level: 'error',
+                  message: errorMessage,
+                  workflowId: entry.workflowId,
+                  action: {
+                    type: 'copilot',
+                    message: copilotMessage,
+                  },
+                })
+              } catch (notificationError) {
+                logger.error('Failed to create block error notification', {
+                  entryId: newEntry.id,
+                  error: notificationError,
+                })
+              }
+            }
+          }
+
+          return newEntry
         },
 
         /**
-         * Clears console entries for a specific workflow
+         * Clears console entries for a specific workflow and clears the run path
          * @param workflowId - The workflow ID to clear entries for
          */
         clearWorkflowConsole: (workflowId: string) => {
           set((state) => ({
             entries: state.entries.filter((entry) => entry.workflowId !== workflowId),
           }))
+          // Clear run path indicators when console is cleared
+          useExecutionStore.getState().clearRunPath()
         },
 
         /**
-         * Clears all console entries or entries for a specific workflow
+         * Clears all console entries or entries for a specific workflow and clears the run path
          * @param workflowId - The workflow ID to clear entries for, or null to clear all
          * @deprecated Use clearWorkflowConsole for clearing specific workflows
          */
@@ -118,6 +162,8 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
               ? state.entries.filter((entry) => entry.workflowId !== workflowId)
               : [],
           }))
+          // Clear run path indicators when console is cleared
+          useExecutionStore.getState().clearRunPath()
         },
 
         exportConsoleCSV: (workflowId: string) => {
@@ -232,12 +278,17 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
               }
 
               if (update.replaceOutput !== undefined) {
-                updatedEntry.output = update.replaceOutput
+                updatedEntry.output =
+                  typeof update.replaceOutput === 'object' && update.replaceOutput !== null
+                    ? redactApiKeys(update.replaceOutput)
+                    : update.replaceOutput
               } else if (update.output !== undefined) {
-                updatedEntry.output = {
+                const mergedOutput = {
                   ...(entry.output || {}),
                   ...update.output,
                 }
+                updatedEntry.output =
+                  typeof mergedOutput === 'object' ? redactApiKeys(mergedOutput) : mergedOutput
               }
 
               if (update.error !== undefined) {
@@ -261,7 +312,10 @@ export const useTerminalConsoleStore = create<ConsoleStore>()(
               }
 
               if (update.input !== undefined) {
-                updatedEntry.input = update.input
+                updatedEntry.input =
+                  typeof update.input === 'object' && update.input !== null
+                    ? redactApiKeys(update.input)
+                    : update.input
               }
 
               return updatedEntry

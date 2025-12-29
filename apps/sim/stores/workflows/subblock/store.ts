@@ -1,6 +1,6 @@
+import { createLogger } from '@sim/logger'
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { createLogger } from '@/lib/logs/console/logger'
 import { getBlock } from '@/blocks'
 import type { SubBlockConfig } from '@/blocks/types'
 import { populateTriggerFieldsFromConfig } from '@/hooks/use-trigger-config-aggregation'
@@ -27,8 +27,6 @@ export const useSubBlockStore = create<SubBlockStore>()(
     workflowValues: {},
     loadingWebhooks: new Set<string>(),
     checkedWebhooks: new Set<string>(),
-    loadingSchedules: new Set<string>(),
-    checkedSchedules: new Set<string>(),
 
     setValue: (blockId: string, subBlockId: string, value: any) => {
       const activeWorkflowId = useWorkflowRegistry.getState().activeWorkflowId
@@ -115,9 +113,6 @@ export const useSubBlockStore = create<SubBlockStore>()(
         },
       }))
 
-      const originalActiveWorkflowId = useWorkflowRegistry.getState().activeWorkflowId
-      useWorkflowRegistry.setState({ activeWorkflowId: workflowId })
-
       Object.entries(blocks).forEach(([blockId, block]) => {
         const blockConfig = getBlock(block.type)
         if (!blockConfig) return
@@ -159,10 +154,14 @@ export const useSubBlockStore = create<SubBlockStore>()(
           }
         }
       })
-
-      if (originalActiveWorkflowId !== workflowId) {
-        useWorkflowRegistry.setState({ activeWorkflowId: originalActiveWorkflowId })
-      }
+    },
+    setWorkflowValues: (workflowId: string, values: Record<string, Record<string, any>>) => {
+      set((state) => ({
+        workflowValues: {
+          ...state.workflowValues,
+          [workflowId]: values,
+        },
+      }))
     },
   }))
 )

@@ -9,6 +9,7 @@ import {
   workspace,
   workspaceInvitation,
 } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import {
@@ -21,11 +22,10 @@ import {
   validateBulkInvitations,
   validateSeatAvailability,
 } from '@/lib/billing/validation/seat-management'
-import { sendEmail } from '@/lib/email/mailer'
-import { quickValidateEmail } from '@/lib/email/validation'
-import { createLogger } from '@/lib/logs/console/logger'
-import { hasWorkspaceAdminAccess } from '@/lib/permissions/utils'
-import { getBaseUrl } from '@/lib/urls/utils'
+import { getBaseUrl } from '@/lib/core/utils/urls'
+import { sendEmail } from '@/lib/messaging/email/mailer'
+import { quickValidateEmail } from '@/lib/messaging/email/validation'
+import { hasWorkspaceAdminAccess } from '@/lib/workspaces/permissions/utils'
 
 const logger = createLogger('OrganizationInvitations')
 
@@ -244,16 +244,40 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const emailsToInvite = newEmails.filter((email: string) => !pendingEmails.includes(email))
 
     if (emailsToInvite.length === 0) {
+      const isSingleEmail = processedEmails.length === 1
+      const existingMembersEmails = processedEmails.filter((email: string) =>
+        existingEmails.includes(email)
+      )
+      const pendingInvitationEmails = processedEmails.filter((email: string) =>
+        pendingEmails.includes(email)
+      )
+
+      if (isSingleEmail) {
+        if (existingMembersEmails.length > 0) {
+          return NextResponse.json(
+            {
+              error: 'Failed to send invitation. User is already a part of the organization.',
+            },
+            { status: 400 }
+          )
+        }
+        if (pendingInvitationEmails.length > 0) {
+          return NextResponse.json(
+            {
+              error:
+                'Failed to send invitation. A pending invitation already exists for this email.',
+            },
+            { status: 400 }
+          )
+        }
+      }
+
       return NextResponse.json(
         {
-          error: 'All emails are already members or have pending invitations',
+          error: 'All emails are already members or have pending invitations.',
           details: {
-            existingMembers: processedEmails.filter((email: string) =>
-              existingEmails.includes(email)
-            ),
-            pendingInvitations: processedEmails.filter((email: string) =>
-              pendingEmails.includes(email)
-            ),
+            existingMembers: existingMembersEmails,
+            pendingInvitations: pendingInvitationEmails,
           },
         },
         { status: 400 }

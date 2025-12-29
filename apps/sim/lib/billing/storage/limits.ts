@@ -9,12 +9,12 @@ import {
   DEFAULT_FREE_STORAGE_LIMIT_GB,
   DEFAULT_PRO_STORAGE_LIMIT_GB,
   DEFAULT_TEAM_STORAGE_LIMIT_GB,
-} from '@sim/db/consts'
+} from '@sim/db/constants'
 import { organization, subscription, userStats } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
-import { getEnv } from '@/lib/env'
-import { isBillingEnabled } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
+import { getEnv } from '@/lib/core/config/env'
+import { isBillingEnabled } from '@/lib/core/config/feature-flags'
 
 const logger = createLogger('StorageLimits')
 

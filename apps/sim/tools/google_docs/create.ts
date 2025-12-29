@@ -1,4 +1,4 @@
-import { createLogger } from '@/lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
 import type { GoogleDocsCreateResponse, GoogleDocsToolParams } from '@/tools/google_docs/types'
 import type { ToolConfig } from '@/tools/types'
 
@@ -50,7 +50,7 @@ export const createTool: ToolConfig<GoogleDocsToolParams, GoogleDocsCreateRespon
 
   request: {
     url: () => {
-      return 'https://www.googleapis.com/drive/v3/files'
+      return 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true'
     },
     method: 'POST',
     headers: (params) => {

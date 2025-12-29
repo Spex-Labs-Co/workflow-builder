@@ -52,7 +52,7 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 
 ### `slack_message`
 
-通过 Slack API 向 Slack 频道或用户发送消息。支持 Slack mrkdwn 格式化。
+向 Slack 频道或直接消息发送消息。支持 Slack mrkdwn 格式。
 
 #### 输入
 
@@ -60,17 +60,20 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
 | `botToken` | string | 否 | 自定义 Bot 的令牌 |
-| `channel` | string | 是 | 目标 Slack 频道（例如，#general） |
+| `channel` | string | 否 | 目标 Slack 频道（例如，#general） |
+| `userId` | string | 否 | 目标 Slack 用户 ID，用于直接消息（例如，U1234567890） |
 | `text` | string | 是 | 要发送的消息文本（支持 Slack mrkdwn 格式） |
-| `thread_ts` | string | 否 | 要回复的线程时间戳（创建线程回复） |
-| `files` | file[] | 否 | 要附加到消息的文件 |
+| `thread_ts` | string | 否 | 回复的线程时间戳（创建线程回复） |
+| `files` | file[] | 否 | 附加到消息的文件 |
 
 #### 输出
 
 | 参数 | 类型 | 描述 |
 | --------- | ---- | ----------- |
+| `message` | object | 包含 Slack 返回的所有属性的完整消息对象 |
 | `ts` | string | 消息时间戳 |
-| `channel` | string | 消息发送的频道 ID |
+| `channel` | string | 发送消息的频道 ID |
+| `fileCount` | number | 上传的文件数量（当附加文件时） |
 
 ### `slack_canvas`
 
@@ -101,20 +104,97 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 
 #### 输入
 
-| 参数 | 类型 | 必需 | 描述 |
+| 参数 | 类型 | 是否必需 | 描述 |
 | --------- | ---- | -------- | ----------- |
 | `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
-| `botToken` | string | 否 | 自定义 Bot 的 Bot token |
-| `channel` | string | 是 | 要读取消息的 Slack 频道（例如：#general） |
-| `limit` | number | 否 | 要检索的消息数量（默认：10，最大：100） |
-| `oldest` | string | 否 | 时间范围的开始（时间戳） |
-| `latest` | string | 否 | 时间范围的结束（时间戳） |
+| `botToken` | string | 否 | 自定义 Bot 的令牌 |
+| `channel` | string | 否 | 要读取消息的 Slack 频道（例如，#general） |
+| `userId` | string | 否 | DM 会话的用户 ID（例如，U1234567890） |
+| `limit` | number | 否 | 要检索的消息数量（默认：10，最大：15） |
+| `oldest` | string | 否 | 时间范围起始（时间戳） |
+| `latest` | string | 否 | 时间范围结束（时间戳） |
 
 #### 输出
 
 | 参数 | 类型 | 描述 |
 | --------- | ---- | ----------- |
 | `messages` | array | 频道中的消息对象数组 |
+
+### `slack_list_channels`
+
+列出 Slack 工作区中的所有频道。返回机器人有权限访问的公共和私人频道。
+
+#### 输入
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
+| `botToken` | string | 否 | 自定义 Bot 的 Bot token |
+| `includePrivate` | boolean | 否 | 包括机器人是成员的私人频道（默认：true） |
+| `excludeArchived` | boolean | 否 | 排除已归档的频道（默认：true） |
+| `limit` | number | 否 | 返回的最大频道数量（默认：100，最大：200） |
+
+#### 输出
+
+| 参数 | 类型 | 描述 |
+| --------- | ---- | ----------- |
+| `channels` | array | 工作区中的频道对象数组 |
+
+### `slack_list_members`
+
+列出 Slack 频道中的所有成员（用户 ID）。可与获取用户信息功能结合使用，将 ID 解析为名称。
+
+#### 输入
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
+| `botToken` | string | 否 | 自定义 Bot 的 Bot token |
+| `channel` | string | 是 | 要列出成员的频道 ID |
+| `limit` | number | 否 | 返回的最大成员数量（默认：100，最大：200） |
+
+#### 输出
+
+| 参数 | 类型 | 描述 |
+| --------- | ---- | ----------- |
+| `members` | array | 频道成员的用户 ID 数组（例如，U1234567890） |
+
+### `slack_list_users`
+
+列出 Slack 工作区中的所有用户。返回包含名称和头像的用户资料。
+
+#### 输入
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
+| `botToken` | string | 否 | 自定义 Bot 的令牌 |
+| `includeDeleted` | boolean | 否 | 是否包含已停用/已删除的用户（默认值：false） |
+| `limit` | number | 否 | 返回的最大用户数量（默认值：100，最大值：200） |
+
+#### 输出
+
+| 参数 | 类型 | 描述 |
+| --------- | ---- | ----------- |
+| `users` | array | 工作区中的用户对象数组 |
+
+### `slack_get_user`
+
+通过用户 ID 获取特定 Slack 用户的详细信息。
+
+#### 输入
+
+| 参数 | 类型 | 是否必需 | 描述 |
+| --------- | ---- | -------- | ----------- |
+| `authMethod` | string | 否 | 认证方法：oauth 或 bot_token |
+| `botToken` | string | 否 | 自定义 Bot 的令牌 |
+| `userId` | string | 是 | 要查询的用户 ID（例如，U1234567890） |
+
+#### 输出
+
+| 参数 | 类型 | 描述 |
+| --------- | ---- | ----------- |
+| `user` | object | 用户的详细信息 |
 
 ### `slack_download`
 
@@ -137,7 +217,7 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 
 ### `slack_update_message`
 
-更新由机器人在 Slack 中先前发送的消息
+更新由机器人在 Slack 中之前发送的消息
 
 #### 输入
 
@@ -153,12 +233,13 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 
 | 参数 | 类型 | 描述 |
 | --------- | ---- | ----------- |
+| `message` | object | 包含 Slack 返回的所有属性的完整更新消息对象 |
 | `content` | string | 成功消息 |
-| `metadata` | object | 更新后的消息元数据 |
+| `metadata` | object | 更新的消息元数据 |
 
 ### `slack_delete_message`
 
-删除由机器人在 Slack 中先前发送的消息
+删除由机器人在 Slack 中之前发送的消息
 
 #### 输入
 
@@ -174,7 +255,7 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
 | 参数 | 类型 | 描述 |
 | --------- | ---- | ----------- |
 | `content` | string | 成功消息 |
-| `metadata` | object | 删除的消息元数据 |
+| `metadata` | object | 已删除消息的元数据 |
 
 ### `slack_add_reaction`
 

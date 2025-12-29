@@ -19,15 +19,11 @@ import {
   OllamaIcon,
   OpenAIIcon,
   OpenRouterIcon,
+  VertexIcon,
+  VllmIcon,
   xAIIcon,
 } from '@/components/icons'
-
-export interface ModelPricing {
-  input: number // Per 1M tokens
-  cachedInput?: number // Per 1M tokens (if supported)
-  output: number // Per 1M tokens
-  updatedAt: string
-}
+import type { ModelPricing } from '@/providers/types'
 
 export interface ModelCapabilities {
   temperature?: {
@@ -36,11 +32,16 @@ export interface ModelCapabilities {
   }
   toolUsageControl?: boolean
   computerUse?: boolean
+  nativeStructuredOutputs?: boolean
   reasoningEffort?: {
     values: string[]
   }
   verbosity?: {
     values: string[]
+  }
+  thinking?: {
+    levels: string[]
+    default?: string
   }
 }
 
@@ -48,6 +49,7 @@ export interface ModelDefinition {
   id: string
   pricing: ModelPricing
   capabilities: ModelCapabilities
+  contextWindow?: number
 }
 
 export interface ProviderDefinition {
@@ -59,11 +61,9 @@ export interface ProviderDefinition {
   modelPatterns?: RegExp[]
   icon?: React.ComponentType<{ className?: string }>
   capabilities?: ModelCapabilities
+  contextInformationAvailable?: boolean
 }
 
-/**
- * Comprehensive provider definitions, single source of truth
- */
 export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
   openrouter: {
     id: 'openrouter',
@@ -72,6 +72,20 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     defaultModel: '',
     modelPatterns: [/^openrouter\//],
     icon: OpenRouterIcon,
+    capabilities: {
+      temperature: { min: 0, max: 2 },
+      toolUsageControl: true,
+    },
+    contextInformationAvailable: false,
+    models: [],
+  },
+  vllm: {
+    id: 'vllm',
+    name: 'vLLM',
+    icon: VllmIcon,
+    description: 'Self-hosted vLLM with an OpenAI-compatible API',
+    defaultModel: 'vllm/generic',
+    modelPatterns: [/^vllm\//],
     capabilities: {
       temperature: { min: 0, max: 2 },
       toolUsageControl: true,
@@ -100,7 +114,98 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 128000,
       },
+      {
+        id: 'gpt-5.2',
+        pricing: {
+          input: 1.75,
+          cachedInput: 0.175,
+          output: 14.0,
+          updatedAt: '2025-12-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      {
+        id: 'gpt-5.1',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2025-11-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      // {
+      //   id: 'gpt-5.1-mini',
+      //   pricing: {
+      //     input: 0.25,
+      //     cachedInput: 0.025,
+      //     output: 2.0,
+      //     updatedAt: '2025-11-14',
+      //   },
+      //   capabilities: {
+      //     reasoningEffort: {
+      //       values: ['none', 'low', 'medium', 'high'],
+      //     },
+      //     verbosity: {
+      //       values: ['low', 'medium', 'high'],
+      //     },
+      //   },
+      //   contextWindow: 400000,
+      // },
+      // {
+      //   id: 'gpt-5.1-nano',
+      //   pricing: {
+      //     input: 0.05,
+      //     cachedInput: 0.005,
+      //     output: 0.4,
+      //     updatedAt: '2025-11-14',
+      //   },
+      //   capabilities: {
+      //     reasoningEffort: {
+      //       values: ['none', 'low', 'medium', 'high'],
+      //     },
+      //     verbosity: {
+      //       values: ['low', 'medium', 'high'],
+      //     },
+      //   },
+      //   contextWindow: 400000,
+      // },
+      // {
+      //   id: 'gpt-5.1-codex',
+      //   pricing: {
+      //     input: 1.25,
+      //     cachedInput: 0.125,
+      //     output: 10.0,
+      //     updatedAt: '2025-11-14',
+      //   },
+      //   capabilities: {
+      //     reasoningEffort: {
+      //       values: ['none', 'medium', 'high'],
+      //     },
+      //     verbosity: {
+      //       values: ['low', 'medium', 'high'],
+      //     },
+      //   },
+      //   contextWindow: 400000,
+      // },
       {
         id: 'gpt-5',
         pricing: {
@@ -117,6 +222,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'gpt-5-mini',
@@ -134,6 +240,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'gpt-5-nano',
@@ -151,6 +258,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'gpt-5-chat-latest',
@@ -161,6 +269,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-08-07',
         },
         capabilities: {},
+        contextWindow: 400000,
       },
       {
         id: 'o1',
@@ -170,7 +279,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           output: 60,
           updatedAt: '2025-06-17',
         },
-        capabilities: {},
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 200000,
       },
       {
         id: 'o3',
@@ -180,7 +294,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           output: 8,
           updatedAt: '2025-06-17',
         },
-        capabilities: {},
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'o4-mini',
@@ -190,7 +309,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           output: 4.4,
           updatedAt: '2025-06-17',
         },
-        capabilities: {},
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'gpt-4.1',
@@ -203,6 +327,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 1000000,
       },
       {
         id: 'gpt-4.1-nano',
@@ -215,6 +340,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 1000000,
       },
       {
         id: 'gpt-4.1-mini',
@@ -227,6 +353,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 1000000,
       },
     ],
   },
@@ -252,6 +379,97 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 128000,
+      },
+      {
+        id: 'azure/gpt-5.2',
+        pricing: {
+          input: 1.75,
+          cachedInput: 0.175,
+          output: 14.0,
+          updatedAt: '2025-12-11',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      {
+        id: 'azure/gpt-5.1',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2025-11-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      {
+        id: 'azure/gpt-5.1-mini',
+        pricing: {
+          input: 0.25,
+          cachedInput: 0.025,
+          output: 2.0,
+          updatedAt: '2025-11-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      {
+        id: 'azure/gpt-5.1-nano',
+        pricing: {
+          input: 0.05,
+          cachedInput: 0.005,
+          output: 0.4,
+          updatedAt: '2025-11-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'low', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
+      },
+      {
+        id: 'azure/gpt-5.1-codex',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2025-11-14',
+        },
+        capabilities: {
+          reasoningEffort: {
+            values: ['none', 'medium', 'high'],
+          },
+          verbosity: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 400000,
       },
       {
         id: 'azure/gpt-5',
@@ -269,6 +487,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'azure/gpt-5-mini',
@@ -286,6 +505,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'azure/gpt-5-nano',
@@ -303,6 +523,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
             values: ['low', 'medium', 'high'],
           },
         },
+        contextWindow: 400000,
       },
       {
         id: 'azure/gpt-5-chat-latest',
@@ -313,6 +534,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-08-07',
         },
         capabilities: {},
+        contextWindow: 400000,
       },
       {
         id: 'azure/o3',
@@ -322,7 +544,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           output: 40,
           updatedAt: '2025-06-15',
         },
-        capabilities: {},
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'azure/o4-mini',
@@ -332,7 +559,12 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           output: 4.4,
           updatedAt: '2025-06-15',
         },
-        capabilities: {},
+        capabilities: {
+          reasoningEffort: {
+            values: ['low', 'medium', 'high'],
+          },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'azure/gpt-4.1',
@@ -343,6 +575,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-06-15',
         },
         capabilities: {},
+        contextWindow: 1000000,
       },
       {
         id: 'azure/model-router',
@@ -353,6 +586,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-06-15',
         },
         capabilities: {},
+        contextWindow: 1000000,
       },
     ],
   },
@@ -377,7 +611,9 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
+          nativeStructuredOutputs: true,
         },
+        contextWindow: 200000,
       },
       {
         id: 'claude-sonnet-4-5',
@@ -389,7 +625,9 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
+          nativeStructuredOutputs: true,
         },
+        contextWindow: 200000,
       },
       {
         id: 'claude-sonnet-4-0',
@@ -402,6 +640,21 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 200000,
+      },
+      {
+        id: 'claude-opus-4-5',
+        pricing: {
+          input: 5.0,
+          cachedInput: 0.5,
+          output: 25.0,
+          updatedAt: '2025-11-24',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+          nativeStructuredOutputs: true,
+        },
+        contextWindow: 200000,
       },
       {
         id: 'claude-opus-4-1',
@@ -413,7 +666,9 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
+          nativeStructuredOutputs: true,
         },
+        contextWindow: 200000,
       },
       {
         id: 'claude-opus-4-0',
@@ -426,6 +681,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 200000,
       },
       {
         id: 'claude-3-7-sonnet-latest',
@@ -439,6 +695,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           temperature: { min: 0, max: 1 },
           computerUse: true,
         },
+        contextWindow: 200000,
       },
       {
         id: 'claude-3-5-sonnet-latest',
@@ -452,6 +709,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           temperature: { min: 0, max: 1 },
           computerUse: true,
         },
+        contextWindow: 200000,
       },
     ],
   },
@@ -467,28 +725,211 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     icon: GeminiIcon,
     models: [
       {
+        id: 'gemini-3-pro-preview',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.2,
+          output: 12.0,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          thinking: {
+            levels: ['low', 'high'],
+            default: 'high',
+          },
+        },
+        contextWindow: 1000000,
+      },
+      {
+        id: 'gemini-3-flash-preview',
+        pricing: {
+          input: 0.5,
+          cachedInput: 0.05,
+          output: 3.0,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          thinking: {
+            levels: ['minimal', 'low', 'medium', 'high'],
+            default: 'high',
+          },
+        },
+        contextWindow: 1000000,
+      },
+      {
         id: 'gemini-2.5-pro',
         pricing: {
-          input: 0.15,
-          cachedInput: 0.075,
-          output: 0.6,
-          updatedAt: '2025-06-17',
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 1048576,
       },
       {
         id: 'gemini-2.5-flash',
         pricing: {
-          input: 0.15,
-          cachedInput: 0.075,
-          output: 0.6,
-          updatedAt: '2025-06-17',
+          input: 0.3,
+          cachedInput: 0.03,
+          output: 2.5,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'gemini-2.5-flash-lite',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.4,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'gemini-2.0-flash',
+        pricing: {
+          input: 0.1,
+          output: 0.4,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1000000,
+      },
+      {
+        id: 'gemini-2.0-flash-lite',
+        pricing: {
+          input: 0.075,
+          output: 0.3,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1000000,
+      },
+    ],
+  },
+  vertex: {
+    id: 'vertex',
+    name: 'Vertex AI',
+    description: "Google's Vertex AI platform for Gemini models",
+    defaultModel: 'vertex/gemini-2.5-pro',
+    modelPatterns: [/^vertex\//],
+    icon: VertexIcon,
+    capabilities: {
+      toolUsageControl: true,
+    },
+    models: [
+      {
+        id: 'vertex/gemini-3-pro-preview',
+        pricing: {
+          input: 2.0,
+          cachedInput: 0.2,
+          output: 12.0,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          thinking: {
+            levels: ['low', 'high'],
+            default: 'high',
+          },
+        },
+        contextWindow: 1000000,
+      },
+      {
+        id: 'vertex/gemini-3-flash-preview',
+        pricing: {
+          input: 0.5,
+          cachedInput: 0.05,
+          output: 3.0,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+          thinking: {
+            levels: ['minimal', 'low', 'medium', 'high'],
+            default: 'high',
+          },
+        },
+        contextWindow: 1000000,
+      },
+      {
+        id: 'vertex/gemini-2.5-pro',
+        pricing: {
+          input: 1.25,
+          cachedInput: 0.125,
+          output: 10.0,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'vertex/gemini-2.5-flash',
+        pricing: {
+          input: 0.3,
+          cachedInput: 0.03,
+          output: 2.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'vertex/gemini-2.5-flash-lite',
+        pricing: {
+          input: 0.1,
+          cachedInput: 0.01,
+          output: 0.4,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1048576,
+      },
+      {
+        id: 'vertex/gemini-2.0-flash',
+        pricing: {
+          input: 0.1,
+          output: 0.4,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1000000,
+      },
+      {
+        id: 'vertex/gemini-2.0-flash-lite',
+        pricing: {
+          input: 0.075,
+          output: 0.3,
+          updatedAt: '2025-12-17',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 2 },
+        },
+        contextWindow: 1000000,
       },
     ],
   },
@@ -512,6 +953,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-03-21',
         },
         capabilities: {},
+        contextWindow: 128000,
       },
       {
         id: 'deepseek-v3',
@@ -524,6 +966,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 2 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'deepseek-r1',
@@ -534,6 +977,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-03-21',
         },
         capabilities: {},
+        contextWindow: 128000,
       },
     ],
   },
@@ -552,13 +996,53 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         id: 'grok-4-latest',
         pricing: {
           input: 3.0,
-          cachedInput: 1.5,
+          cachedInput: 0.75,
           output: 15.0,
-          updatedAt: '2025-10-11',
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
+      },
+      {
+        id: 'grok-4-0709',
+        pricing: {
+          input: 3.0,
+          cachedInput: 0.75,
+          output: 15.0,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
+      },
+      {
+        id: 'grok-4-1-fast-reasoning',
+        pricing: {
+          input: 0.2,
+          cachedInput: 0.05,
+          output: 0.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 2000000,
+      },
+      {
+        id: 'grok-4-1-fast-non-reasoning',
+        pricing: {
+          input: 0.2,
+          cachedInput: 0.05,
+          output: 0.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 2000000,
       },
       {
         id: 'grok-4-fast-reasoning',
@@ -571,6 +1055,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 2000000,
       },
       {
         id: 'grok-4-fast-non-reasoning',
@@ -583,6 +1068,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 2000000,
       },
       {
         id: 'grok-code-fast-1',
@@ -595,6 +1081,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
       },
       {
         id: 'grok-3-latest',
@@ -607,6 +1094,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 131072,
       },
       {
         id: 'grok-3-fast-latest',
@@ -619,6 +1107,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 131072,
       },
     ],
   },
@@ -630,7 +1119,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     modelPatterns: [/^cerebras/],
     icon: CerebrasIcon,
     capabilities: {
-      toolUsageControl: false,
+      toolUsageControl: true,
     },
     models: [
       {
@@ -641,6 +1130,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 32000,
       },
       {
         id: 'cerebras/llama-3.1-70b',
@@ -650,6 +1140,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 128000,
       },
       {
         id: 'cerebras/llama-3.3-70b',
@@ -659,6 +1150,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 128000,
       },
       {
         id: 'cerebras/llama-4-scout-17b-16e-instruct',
@@ -668,6 +1160,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 10000000,
       },
     ],
   },
@@ -679,7 +1172,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     modelPatterns: [/^groq/],
     icon: GroqIcon,
     capabilities: {
-      toolUsageControl: false,
+      toolUsageControl: true,
     },
     models: [
       {
@@ -690,6 +1183,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/openai/gpt-oss-20b',
@@ -699,6 +1193,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/llama-3.1-8b-instant',
@@ -708,6 +1203,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/llama-3.3-70b-versatile',
@@ -717,6 +1213,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/llama-4-scout-17b-instruct',
@@ -726,6 +1223,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/llama-4-maverick-17b-instruct',
@@ -735,6 +1233,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/meta-llama/llama-4-maverick-17b-128e-instruct',
@@ -744,6 +1243,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/gemma2-9b-it',
@@ -753,6 +1253,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 8192,
       },
       {
         id: 'groq/deepseek-r1-distill-llama-70b',
@@ -762,6 +1263,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 128000,
       },
       {
         id: 'groq/moonshotai/kimi-k2-instruct',
@@ -771,6 +1273,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
       {
         id: 'groq/meta-llama/llama-guard-4-12b',
@@ -780,6 +1283,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
           updatedAt: '2025-10-11',
         },
         capabilities: {},
+        contextWindow: 131072,
       },
     ],
   },
@@ -788,7 +1292,14 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     name: 'Mistral AI',
     description: "Mistral AI's language models",
     defaultModel: 'mistral-large-latest',
-    modelPatterns: [/^mistral/, /^magistral/, /^open-mistral/, /^codestral/, /^ministral/],
+    modelPatterns: [
+      /^mistral/,
+      /^magistral/,
+      /^open-mistral/,
+      /^codestral/,
+      /^ministral/,
+      /^devstral/,
+    ],
     icon: MistralIcon,
     capabilities: {
       toolUsageControl: true,
@@ -797,13 +1308,26 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
       {
         id: 'mistral-large-latest',
         pricing: {
-          input: 2.0,
-          output: 6.0,
-          updatedAt: '2025-10-11',
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
+      },
+      {
+        id: 'mistral-large-2512',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
       },
       {
         id: 'mistral-large-2411',
@@ -815,6 +1339,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'magistral-medium-latest',
@@ -826,28 +1351,55 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'magistral-medium-2509',
         pricing: {
           input: 2.0,
           output: 5.0,
-          updatedAt: '2025-10-11',
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
+      },
+      {
+        id: 'magistral-small-latest',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
+      },
+      {
+        id: 'magistral-small-2509',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'mistral-medium-latest',
         pricing: {
           input: 0.4,
           output: 2.0,
-          updatedAt: '2025-10-11',
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'mistral-medium-2508',
@@ -859,28 +1411,43 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
+      },
+      {
+        id: 'mistral-medium-2505',
+        pricing: {
+          input: 0.4,
+          output: 2.0,
+          updatedAt: '2025-05-07',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
       },
       {
         id: 'mistral-small-latest',
         pricing: {
-          input: 0.2,
-          output: 0.6,
-          updatedAt: '2025-10-11',
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'mistral-small-2506',
         pricing: {
-          input: 0.2,
-          output: 0.6,
-          updatedAt: '2025-10-11',
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'open-mistral-nemo',
@@ -892,6 +1459,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'codestral-latest',
@@ -903,6 +1471,7 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
       },
       {
         id: 'codestral-2508',
@@ -914,39 +1483,139 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
       },
       {
-        id: 'ministral-8b-latest',
+        id: 'devstral-small-latest',
         pricing: {
           input: 0.1,
-          output: 0.1,
-          updatedAt: '2025-10-11',
+          output: 0.3,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
+      },
+      {
+        id: 'devstral-small-2507',
+        pricing: {
+          input: 0.1,
+          output: 0.3,
+          updatedAt: '2025-07-10',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
+      },
+      {
+        id: 'devstral-medium-2507',
+        pricing: {
+          input: 0.5,
+          output: 1.5,
+          updatedAt: '2025-07-10',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
+      },
+      {
+        id: 'ministral-14b-latest',
+        pricing: {
+          input: 0.2,
+          output: 0.2,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
+      },
+      {
+        id: 'ministral-14b-2512',
+        pricing: {
+          input: 0.2,
+          output: 0.2,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
+      },
+      {
+        id: 'ministral-8b-latest',
+        pricing: {
+          input: 0.15,
+          output: 0.15,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
+      },
+      {
+        id: 'ministral-8b-2512',
+        pricing: {
+          input: 0.15,
+          output: 0.15,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
       },
       {
         id: 'ministral-8b-2410',
         pricing: {
           input: 0.1,
           output: 0.1,
-          updatedAt: '2025-10-11',
+          updatedAt: '2025-10-09',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 128000,
       },
       {
         id: 'ministral-3b-latest',
         pricing: {
-          input: 0.04,
-          output: 0.04,
-          updatedAt: '2025-10-11',
+          input: 0.1,
+          output: 0.1,
+          updatedAt: '2025-12-02',
         },
         capabilities: {
           temperature: { min: 0, max: 1 },
         },
+        contextWindow: 256000,
+      },
+      {
+        id: 'ministral-3b-2512',
+        pricing: {
+          input: 0.1,
+          output: 0.1,
+          updatedAt: '2025-12-02',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 256000,
+      },
+      {
+        id: 'ministral-3b-2410',
+        pricing: {
+          input: 0.04,
+          output: 0.04,
+          updatedAt: '2025-10-09',
+        },
+        capabilities: {
+          temperature: { min: 0, max: 1 },
+        },
+        contextWindow: 128000,
       },
     ],
   },
@@ -957,27 +1626,22 @@ export const PROVIDER_DEFINITIONS: Record<string, ProviderDefinition> = {
     defaultModel: '',
     modelPatterns: [],
     icon: OllamaIcon,
+    capabilities: {
+      toolUsageControl: false, // Ollama does not support tool_choice parameter
+    },
+    contextInformationAvailable: false,
     models: [], // Populated dynamically
   },
 }
 
-/**
- * Get all models for a specific provider
- */
 export function getProviderModels(providerId: string): string[] {
   return PROVIDER_DEFINITIONS[providerId]?.models.map((m) => m.id) || []
 }
 
-/**
- * Get the default model for a specific provider
- */
 export function getProviderDefaultModel(providerId: string): string {
   return PROVIDER_DEFINITIONS[providerId]?.defaultModel || ''
 }
 
-/**
- * Get pricing information for a specific model
- */
 export function getModelPricing(modelId: string): ModelPricing | null {
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
     const model = provider.models.find((m) => m.id.toLowerCase() === modelId.toLowerCase())
@@ -988,20 +1652,15 @@ export function getModelPricing(modelId: string): ModelPricing | null {
   return null
 }
 
-/**
- * Get capabilities for a specific model
- */
 export function getModelCapabilities(modelId: string): ModelCapabilities | null {
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
     const model = provider.models.find((m) => m.id.toLowerCase() === modelId.toLowerCase())
     if (model) {
-      // Merge provider capabilities with model capabilities, model takes precedence
       const capabilities: ModelCapabilities = { ...provider.capabilities, ...model.capabilities }
       return capabilities
     }
   }
 
-  // If no model found, check for provider-level capabilities for dynamically fetched models
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
     if (provider.modelPatterns) {
       for (const pattern of provider.modelPatterns) {
@@ -1015,9 +1674,6 @@ export function getModelCapabilities(modelId: string): ModelCapabilities | null 
   return null
 }
 
-/**
- * Get all models that support temperature
- */
 export function getModelsWithTemperatureSupport(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1030,9 +1686,6 @@ export function getModelsWithTemperatureSupport(): string[] {
   return models
 }
 
-/**
- * Get all models with temperature range 0-1
- */
 export function getModelsWithTempRange01(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1045,9 +1698,6 @@ export function getModelsWithTempRange01(): string[] {
   return models
 }
 
-/**
- * Get all models with temperature range 0-2
- */
 export function getModelsWithTempRange02(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1060,9 +1710,6 @@ export function getModelsWithTempRange02(): string[] {
   return models
 }
 
-/**
- * Get all providers that support tool usage control
- */
 export function getProvidersWithToolUsageControl(): string[] {
   const providers: string[] = []
   for (const [providerId, provider] of Object.entries(PROVIDER_DEFINITIONS)) {
@@ -1073,17 +1720,14 @@ export function getProvidersWithToolUsageControl(): string[] {
   return providers
 }
 
-/**
- * Get all models that are hosted (don't require user API keys)
- */
 export function getHostedModels(): string[] {
-  // Currently, OpenAI and Anthropic models are hosted
-  return [...getProviderModels('openai'), ...getProviderModels('anthropic')]
+  return [
+    ...getProviderModels('openai'),
+    ...getProviderModels('anthropic'),
+    ...getProviderModels('google'),
+  ]
 }
 
-/**
- * Get all computer use models
- */
 export function getComputerUseModels(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1096,32 +1740,20 @@ export function getComputerUseModels(): string[] {
   return models
 }
 
-/**
- * Check if a model supports temperature
- */
 export function supportsTemperature(modelId: string): boolean {
   const capabilities = getModelCapabilities(modelId)
   return !!capabilities?.temperature
 }
 
-/**
- * Get maximum temperature for a model
- */
 export function getMaxTemperature(modelId: string): number | undefined {
   const capabilities = getModelCapabilities(modelId)
   return capabilities?.temperature?.max
 }
 
-/**
- * Check if a provider supports tool usage control
- */
 export function supportsToolUsageControl(providerId: string): boolean {
   return getProvidersWithToolUsageControl().includes(providerId)
 }
 
-/**
- * Update Ollama models dynamically
- */
 export function updateOllamaModels(models: string[]): void {
   PROVIDER_DEFINITIONS.ollama.models = models.map((modelId) => ({
     id: modelId,
@@ -1134,9 +1766,18 @@ export function updateOllamaModels(models: string[]): void {
   }))
 }
 
-/**
- * Update OpenRouter models dynamically
- */
+export function updateVLLMModels(models: string[]): void {
+  PROVIDER_DEFINITIONS.vllm.models = models.map((modelId) => ({
+    id: modelId,
+    pricing: {
+      input: 0,
+      output: 0,
+      updatedAt: new Date().toISOString().split('T')[0],
+    },
+    capabilities: {},
+  }))
+}
+
 export function updateOpenRouterModels(models: string[]): void {
   PROVIDER_DEFINITIONS.openrouter.models = models.map((modelId) => ({
     id: modelId,
@@ -1149,9 +1790,6 @@ export function updateOpenRouterModels(models: string[]): void {
   }))
 }
 
-/**
- * Embedding model pricing - separate from chat models
- */
 export const EMBEDDING_MODEL_PRICING: Record<string, ModelPricing> = {
   'text-embedding-3-small': {
     input: 0.02, // $0.02 per 1M tokens
@@ -1170,16 +1808,10 @@ export const EMBEDDING_MODEL_PRICING: Record<string, ModelPricing> = {
   },
 }
 
-/**
- * Get pricing for embedding models specifically
- */
 export function getEmbeddingModelPricing(modelId: string): ModelPricing | null {
   return EMBEDDING_MODEL_PRICING[modelId] || null
 }
 
-/**
- * Get all models that support reasoning effort
- */
 export function getModelsWithReasoningEffort(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1193,8 +1825,19 @@ export function getModelsWithReasoningEffort(): string[] {
 }
 
 /**
- * Get all models that support verbosity
+ * Get the reasoning effort values for a specific model
+ * Returns the valid options for that model, or null if the model doesn't support reasoning effort
  */
+export function getReasoningEffortValuesForModel(modelId: string): string[] | null {
+  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
+    const model = provider.models.find((m) => m.id.toLowerCase() === modelId.toLowerCase())
+    if (model?.capabilities.reasoningEffort) {
+      return model.capabilities.reasoningEffort.values
+    }
+  }
+  return null
+}
+
 export function getModelsWithVerbosity(): string[] {
   const models: string[] = []
   for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
@@ -1205,4 +1848,85 @@ export function getModelsWithVerbosity(): string[] {
     }
   }
   return models
+}
+
+/**
+ * Get the verbosity values for a specific model
+ * Returns the valid options for that model, or null if the model doesn't support verbosity
+ */
+export function getVerbosityValuesForModel(modelId: string): string[] | null {
+  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
+    const model = provider.models.find((m) => m.id.toLowerCase() === modelId.toLowerCase())
+    if (model?.capabilities.verbosity) {
+      return model.capabilities.verbosity.values
+    }
+  }
+  return null
+}
+
+/**
+ * Check if a model supports native structured outputs.
+ * Handles model IDs with date suffixes (e.g., claude-sonnet-4-5-20250514).
+ */
+export function supportsNativeStructuredOutputs(modelId: string): boolean {
+  const normalizedModelId = modelId.toLowerCase()
+
+  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
+    for (const model of provider.models) {
+      if (model.capabilities.nativeStructuredOutputs) {
+        const baseModelId = model.id.toLowerCase()
+        // Check exact match or date-suffixed version (e.g., claude-sonnet-4-5-20250514)
+        if (normalizedModelId === baseModelId || normalizedModelId.startsWith(`${baseModelId}-`)) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Check if a model supports thinking/reasoning features.
+ * Returns the thinking capability config if supported, null otherwise.
+ */
+export function getThinkingCapability(
+  modelId: string
+): { levels: string[]; default?: string } | null {
+  const normalizedModelId = modelId.toLowerCase()
+
+  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
+    for (const model of provider.models) {
+      if (model.capabilities.thinking) {
+        const baseModelId = model.id.toLowerCase()
+        if (normalizedModelId === baseModelId || normalizedModelId.startsWith(`${baseModelId}-`)) {
+          return model.capabilities.thinking
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Get all models that support thinking capability
+ */
+export function getModelsWithThinking(): string[] {
+  const models: string[] = []
+  for (const provider of Object.values(PROVIDER_DEFINITIONS)) {
+    for (const model of provider.models) {
+      if (model.capabilities.thinking) {
+        models.push(model.id)
+      }
+    }
+  }
+  return models
+}
+
+/**
+ * Get the thinking levels for a specific model
+ * Returns the valid levels for that model, or null if the model doesn't support thinking
+ */
+export function getThinkingLevelsForModel(modelId: string): string[] | null {
+  const capability = getThinkingCapability(modelId)
+  return capability?.levels ?? null
 }

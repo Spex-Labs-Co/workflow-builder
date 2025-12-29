@@ -1,7 +1,7 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
-import { env } from '@/lib/env'
-import { isProd } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
+import { env } from '@/lib/core/config/env'
+import { isProd } from '@/lib/core/config/feature-flags'
 
 const logger = createLogger('TelemetryAPI')
 

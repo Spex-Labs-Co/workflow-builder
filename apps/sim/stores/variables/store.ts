@@ -1,25 +1,26 @@
+import { createLogger } from '@sim/logger'
 import { v4 as uuidv4 } from 'uuid'
 import { create } from 'zustand'
 import { devtools, persist } from 'zustand/middleware'
-import { createLogger } from '@/lib/logs/console/logger'
-import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-import { useSubBlockStore } from '@/stores/workflows/subblock/store'
 import type {
   Variable,
   VariablesDimensions,
   VariablesPosition,
   VariablesStore,
   VariableType,
-} from './types'
+} from '@/stores/variables/types'
+import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
+import { useSubBlockStore } from '@/stores/workflows/subblock/store'
+import { normalizeName } from '@/stores/workflows/utils'
 
 const logger = createLogger('VariablesModalStore')
 
 /**
  * Floating variables modal default dimensions.
- * Matches the chat modal baseline for visual consistency.
+ * Slightly larger than the chat modal for more comfortable editing.
  */
-const DEFAULT_WIDTH = 250
-const DEFAULT_HEIGHT = 286
+const DEFAULT_WIDTH = 320
+const DEFAULT_HEIGHT = 320
 
 /**
  * Minimum and maximum modal dimensions.
@@ -303,8 +304,8 @@ export const useVariablesStore = create<VariablesStore>()(
                   Object.entries(workflowValues).forEach(([blockId, blockValues]) => {
                     Object.entries(blockValues as Record<string, any>).forEach(
                       ([subBlockId, value]) => {
-                        const oldVarName = oldVariableName.replace(/\s+/g, '').toLowerCase()
-                        const newVarName = newName.replace(/\s+/g, '').toLowerCase()
+                        const oldVarName = normalizeName(oldVariableName)
+                        const newVarName = normalizeName(newName)
                         const regex = new RegExp(`<variable\\.${oldVarName}>`, 'gi')
 
                         updatedWorkflowValues[blockId][subBlockId] = updateReferences(

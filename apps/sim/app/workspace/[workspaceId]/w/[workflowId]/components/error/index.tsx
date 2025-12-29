@@ -1,9 +1,11 @@
 'use client'
 
 import { Component, type ReactNode, useEffect } from 'react'
-import { createLogger } from '@/lib/logs/console/logger'
-import { Panel } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/panel-new/panel-new'
-import { SidebarNew } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar-new'
+import { createLogger } from '@sim/logger'
+import { ReactFlowProvider } from 'reactflow'
+import { Panel } from '@/app/workspace/[workspaceId]/w/[workflowId]/components'
+import { usePreventZoom } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
+import { Sidebar } from '@/app/workspace/[workspaceId]/w/components/sidebar/sidebar'
 
 const logger = createLogger('ErrorBoundary')
 
@@ -19,18 +21,19 @@ interface ErrorUIProps {
 
 export function ErrorUI({
   title = 'Workflow Error',
-  message = 'This workflow encountered an error and is currently unavailable. Please try again later or create a new workflow.',
+  message = 'This workflow encountered an error. Please refresh the page or create a new workflow.',
   onReset,
   fullScreen = false,
 }: ErrorUIProps) {
+  const preventZoomRef = usePreventZoom()
   const containerClass = fullScreen
     ? 'flex flex-col w-full h-screen bg-[var(--surface-1)]'
     : 'flex flex-col w-full h-full bg-[var(--surface-1)]'
 
   return (
-    <div className={containerClass}>
+    <div ref={preventZoomRef} className={containerClass}>
       {/* Sidebar */}
-      <SidebarNew />
+      <Sidebar />
 
       {/* Main content area */}
       <div className='relative flex flex-1'>
@@ -41,14 +44,15 @@ export function ErrorUI({
             <h3 className='font-semibold text-[16px] text-[var(--text-primary)]'>{title}</h3>
 
             {/* Message */}
-            <p className='max-w-md text-center font-medium text-[14px] text-[var(--text-tertiary)]'>
+            <p className='max-w-sm text-center font-medium text-[14px] text-[var(--text-tertiary)]'>
               {message}
             </p>
           </div>
         </div>
 
-        {/* Panel */}
-        <Panel />
+        <ReactFlowProvider>
+          <Panel />
+        </ReactFlowProvider>
       </div>
     </div>
   )

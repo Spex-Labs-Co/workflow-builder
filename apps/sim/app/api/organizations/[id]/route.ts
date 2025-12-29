@@ -1,5 +1,6 @@
 import { db } from '@sim/db'
 import { member, organization } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq, ne } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -7,9 +8,7 @@ import { getSession } from '@/lib/auth'
 import {
   getOrganizationSeatAnalytics,
   getOrganizationSeatInfo,
-  updateOrganizationSeats,
 } from '@/lib/billing/validation/seat-management'
-import { createLogger } from '@/lib/logs/console/logger'
 
 const logger = createLogger('OrganizationAPI')
 
@@ -25,7 +24,6 @@ const updateOrganizationSchema = z.object({
     )
     .optional(),
   logo: z.string().nullable().optional(),
-  seats: z.number().int().min(1, 'Invalid seat count').optional(),
 })
 
 /**
@@ -116,7 +114,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 /**
  * PUT /api/organizations/[id]
- * Update organization settings or seat count
+ * Update organization settings (name, slug, logo)
+ * Note: For seat updates, use PUT /api/organizations/[id]/seats instead
  */
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -135,7 +134,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: firstError.message }, { status: 400 })
     }
 
-    const { name, slug, logo, seats } = validation.data
+    const { name, slug, logo } = validation.data
 
     // Verify user has admin access
     const memberEntry = await db
@@ -153,31 +152,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!['owner', 'admin'].includes(memberEntry[0].role)) {
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 })
-    }
-
-    // Handle seat count update
-    if (seats !== undefined) {
-      const result = await updateOrganizationSeats(organizationId, seats, session.user.id)
-
-      if (!result.success) {
-        return NextResponse.json({ error: result.error }, { status: 400 })
-      }
-
-      logger.info('Organization seat count updated', {
-        organizationId,
-        newSeatCount: seats,
-        updatedBy: session.user.id,
-      })
-
-      return NextResponse.json({
-        success: true,
-        message: 'Seat count updated successfully',
-        data: {
-          seats: seats,
-          updatedBy: session.user.id,
-          updatedAt: new Date().toISOString(),
-        },
-      })
     }
 
     // Handle settings update

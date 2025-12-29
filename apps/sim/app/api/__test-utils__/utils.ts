@@ -1,5 +1,8 @@
+import { createMockLogger as createSimTestingMockLogger } from '@sim/testing'
 import { NextRequest } from 'next/server'
 import { vi } from 'vitest'
+
+export { createMockLogger } from '@sim/testing'
 
 export interface MockUser {
   id: string
@@ -214,12 +217,11 @@ export const mockDb = {
   })),
 }
 
-export const mockLogger = {
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-}
+/**
+ * Mock logger using @sim/testing createMockLogger.
+ * This provides a consistent mock logger across all API tests.
+ */
+export const mockLogger = createSimTestingMockLogger()
 
 export const mockUser = {
   id: 'user-123',
@@ -305,24 +307,20 @@ export function createMockRequest(
 }
 
 export function mockExecutionDependencies() {
-  vi.mock('@/lib/utils', async () => {
-    const actual = await vi.importActual('@/lib/utils')
-    return {
-      ...(actual as any),
-      decryptSecret: vi.fn().mockImplementation((encrypted: string) => {
-        const entries = Object.entries(mockEnvironmentVars)
-        const found = entries.find(([_, val]) => val === encrypted)
-        const key = found ? found[0] : null
+  vi.mock('@/lib/core/security/encryption', () => ({
+    decryptSecret: vi.fn().mockImplementation((encrypted: string) => {
+      const entries = Object.entries(mockEnvironmentVars)
+      const found = entries.find(([_, val]) => val === encrypted)
+      const key = found ? found[0] : null
 
-        return Promise.resolve({
-          decrypted:
-            key && key in mockDecryptedEnvVars
-              ? mockDecryptedEnvVars[key as keyof typeof mockDecryptedEnvVars]
-              : 'decrypted-value',
-        })
-      }),
-    }
-  })
+      return Promise.resolve({
+        decrypted:
+          key && key in mockDecryptedEnvVars
+            ? mockDecryptedEnvVars[key as keyof typeof mockDecryptedEnvVars]
+            : 'decrypted-value',
+      })
+    }),
+  }))
 
   vi.mock('@/lib/logs/execution/trace-spans/trace-spans', () => ({
     buildTraceSpans: vi.fn().mockReturnValue({
@@ -455,7 +453,7 @@ export function mockWorkflowAccessValidation(shouldSucceed = true) {
 }
 
 export async function getMockedDependencies() {
-  const utilsModule = await import('@/lib/utils')
+  const encryptionModule = await import('@/lib/core/security/encryption')
   const traceSpansModule = await import('@/lib/logs/execution/trace-spans/trace-spans')
   const workflowUtilsModule = await import('@/lib/workflows/utils')
   const executorModule = await import('@/executor')
@@ -463,7 +461,7 @@ export async function getMockedDependencies() {
   const dbModule = await import('@sim/db')
 
   return {
-    decryptSecret: utilsModule.decryptSecret,
+    decryptSecret: encryptionModule.decryptSecret,
     buildTraceSpans: traceSpansModule.buildTraceSpans,
     updateWorkflowRunCounts: workflowUtilsModule.updateWorkflowRunCounts,
     Executor: executorModule.Executor,
@@ -733,10 +731,11 @@ export function mockKnowledgeSchemas() {
 }
 
 /**
- * Mock console logger
+ * Mock console logger using the shared mockLogger instance.
+ * This ensures tests can assert on the same mockLogger instance exported from this module.
  */
 export function mockConsoleLogger() {
-  vi.doMock('@/lib/logs/console/logger', () => ({
+  vi.doMock('@sim/logger', () => ({
     createLogger: vi.fn().mockReturnValue(mockLogger),
   }))
 }
@@ -801,7 +800,7 @@ export function mockFileSystem(
 export function mockEncryption(options: { encryptedValue?: string; decryptedValue?: string } = {}) {
   const { encryptedValue = 'encrypted-value', decryptedValue = 'decrypted-value' } = options
 
-  vi.doMock('@/lib/utils', () => ({
+  vi.doMock('@/lib/core/security/encryption', () => ({
     encryptSecret: vi.fn().mockResolvedValue({ encrypted: encryptedValue }),
     decryptSecret: vi.fn().mockResolvedValue({ decrypted: decryptedValue }),
   }))

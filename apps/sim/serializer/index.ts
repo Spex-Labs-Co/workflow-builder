@@ -1,8 +1,9 @@
+import { createLogger } from '@sim/logger'
 import type { Edge } from 'reactflow'
-import { BlockPathCalculator } from '@/lib/block-path-calculator'
-import { createLogger } from '@/lib/logs/console/logger'
+import { BlockPathCalculator } from '@/lib/workflows/blocks/block-path-calculator'
 import { getBlock } from '@/blocks'
 import type { SubBlockConfig } from '@/blocks/types'
+import { REFERENCE } from '@/executor/constants'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 import type { BlockState, Loop, Parallel } from '@/stores/workflows/workflow/types'
 import { generateLoopBlocks, generateParallelBlocks } from '@/stores/workflows/workflow/utils'
@@ -36,6 +37,114 @@ function shouldIncludeField(subBlockConfig: SubBlockConfig, isAdvancedMode: bool
   }
 
   return true
+}
+
+/**
+ * Evaluates a condition object against current field values.
+ * Used to determine if a conditionally-visible field should be included in params.
+ */
+function evaluateCondition(
+  condition:
+    | {
+        field: string
+        value: any
+        not?: boolean
+        and?: { field: string; value: any; not?: boolean }
+      }
+    | (() => {
+        field: string
+        value: any
+        not?: boolean
+        and?: { field: string; value: any; not?: boolean }
+      })
+    | undefined,
+  values: Record<string, any>
+): boolean {
+  if (!condition) return true
+
+  const actual = typeof condition === 'function' ? condition() : condition
+  const fieldValue = values[actual.field]
+
+  const valueMatch = Array.isArray(actual.value)
+    ? fieldValue != null &&
+      (actual.not ? !actual.value.includes(fieldValue) : actual.value.includes(fieldValue))
+    : actual.not
+      ? fieldValue !== actual.value
+      : fieldValue === actual.value
+
+  const andMatch = !actual.and
+    ? true
+    : (() => {
+        const andFieldValue = values[actual.and!.field]
+        const andValueMatch = Array.isArray(actual.and!.value)
+          ? andFieldValue != null &&
+            (actual.and!.not
+              ? !actual.and!.value.includes(andFieldValue)
+              : actual.and!.value.includes(andFieldValue))
+          : actual.and!.not
+            ? andFieldValue !== actual.and!.value
+            : andFieldValue === actual.and!.value
+        return andValueMatch
+      })()
+
+  return valueMatch && andMatch
+}
+
+/**
+ * Helper function to migrate agent block params from old format to messages array
+ * Transforms systemPrompt/userPrompt into messages array format
+ * Only migrates if old format exists and new format doesn't (idempotent)
+ */
+function migrateAgentParamsToMessages(
+  params: Record<string, any>,
+  subBlocks: Record<string, any>,
+  blockId: string
+): void {
+  // Only migrate if old format exists and new format doesn't
+  if ((params.systemPrompt || params.userPrompt) && !params.messages) {
+    logger.info('Migrating agent block from legacy format to messages array', {
+      blockId,
+      hasSystemPrompt: !!params.systemPrompt,
+      hasUserPrompt: !!params.userPrompt,
+    })
+
+    const messages: any[] = []
+
+    // Add system message first (industry standard)
+    if (params.systemPrompt) {
+      messages.push({
+        role: 'system',
+        content: params.systemPrompt,
+      })
+    }
+
+    // Add user message
+    if (params.userPrompt) {
+      let userContent = params.userPrompt
+
+      // Handle object format (e.g., { input: "..." })
+      if (typeof userContent === 'object' && userContent !== null) {
+        if ('input' in userContent) {
+          userContent = userContent.input
+        } else {
+          // If it's an object but doesn't have 'input', stringify it
+          userContent = JSON.stringify(userContent)
+        }
+      }
+
+      messages.push({
+        role: 'user',
+        content: String(userContent),
+      })
+    }
+
+    // Set the migrated messages in subBlocks
+    subBlocks.messages = {
+      id: 'messages',
+      type: 'messages-input',
+      value: messages,
+    }
+  }
 }
 
 export class Serializer {
@@ -90,89 +199,8 @@ export class Serializer {
     loops: Record<string, Loop>,
     parallels: Record<string, Parallel>
   ): void {
-    // Validate loops in forEach mode
-    Object.values(loops || {}).forEach((loop) => {
-      if (!loop) return
-      if (loop.loopType === 'forEach') {
-        const items = (loop as any).forEachItems
-
-        const hasNonEmptyCollection = (() => {
-          if (items === undefined || items === null) return false
-          if (Array.isArray(items)) return items.length > 0
-          if (typeof items === 'object') return Object.keys(items).length > 0
-          if (typeof items === 'string') {
-            const trimmed = items.trim()
-            if (trimmed.length === 0) return false
-            // If it looks like JSON, parse to confirm non-empty [] / {}
-            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-              try {
-                const parsed = JSON.parse(trimmed)
-                if (Array.isArray(parsed)) return parsed.length > 0
-                if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
-              } catch {
-                // Non-JSON or invalid JSON string – allow non-empty string (could be a reference like <start.items>)
-                return true
-              }
-            }
-            // Non-JSON string – allow (may be a variable reference/expression)
-            return true
-          }
-          return false
-        })()
-
-        if (!hasNonEmptyCollection) {
-          const blockName = blocks[loop.id]?.name || 'Loop'
-          const error = new WorkflowValidationError(
-            `${blockName} requires a collection for forEach mode. Provide a non-empty array/object or a variable reference.`,
-            loop.id,
-            'loop',
-            blockName
-          )
-          throw error
-        }
-      }
-    })
-
-    // Validate parallels in collection mode
-    Object.values(parallels || {}).forEach((parallel) => {
-      if (!parallel) return
-      if ((parallel as any).parallelType === 'collection') {
-        const distribution = (parallel as any).distribution
-
-        const hasNonEmptyDistribution = (() => {
-          if (distribution === undefined || distribution === null) return false
-          if (Array.isArray(distribution)) return distribution.length > 0
-          if (typeof distribution === 'object') return Object.keys(distribution).length > 0
-          if (typeof distribution === 'string') {
-            const trimmed = distribution.trim()
-            if (trimmed.length === 0) return false
-            // If it looks like JSON, parse to confirm non-empty [] / {}
-            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-              try {
-                const parsed = JSON.parse(trimmed)
-                if (Array.isArray(parsed)) return parsed.length > 0
-                if (parsed && typeof parsed === 'object') return Object.keys(parsed).length > 0
-              } catch {
-                return true
-              }
-            }
-            return true
-          }
-          return false
-        })()
-
-        if (!hasNonEmptyDistribution) {
-          const blockName = blocks[parallel.id]?.name || 'Parallel'
-          const error = new WorkflowValidationError(
-            `${blockName} requires a collection for collection mode. Provide a non-empty array/object or a variable reference.`,
-            parallel.id,
-            'parallel',
-            blockName
-          )
-          throw error
-        }
-      }
-    })
+    // Note: Empty collections in forEach loops and parallel collection mode are handled gracefully
+    // at runtime - the loop/parallel will simply be skipped. No build-time validation needed.
   }
 
   private serializeBlock(
@@ -324,7 +352,7 @@ export class Serializer {
       const trimmedValue = responseFormat.trim()
 
       // Check for variable references like <start.input>
-      if (trimmedValue.startsWith('<') && trimmedValue.includes('>')) {
+      if (trimmedValue.startsWith(REFERENCE.START) && trimmedValue.includes(REFERENCE.END)) {
         // Keep variable references as-is
         return trimmedValue
       }
@@ -365,11 +393,17 @@ export class Serializer {
     const params: Record<string, any> = {}
     const isAdvancedMode = block.advancedMode ?? false
     const isStarterBlock = block.type === 'starter'
+    const isAgentBlock = block.type === 'agent'
 
-    // First collect all current values from subBlocks, filtering by mode
+    // First pass: collect ALL raw values for condition evaluation
+    const allValues: Record<string, any> = {}
     Object.entries(block.subBlocks).forEach(([id, subBlock]) => {
-      // Find the corresponding subblock config to check its mode
-      const subBlockConfig = blockConfig.subBlocks.find((config) => config.id === id)
+      allValues[id] = subBlock.value
+    })
+
+    // Second pass: filter by mode and conditions
+    Object.entries(block.subBlocks).forEach(([id, subBlock]) => {
+      const matchingConfigs = blockConfig.subBlocks.filter((config) => config.id === id)
 
       // Include field if it matches current mode OR if it's the starter inputFormat with values
       const hasStarterInputFormatValues =
@@ -378,9 +412,24 @@ export class Serializer {
         Array.isArray(subBlock.value) &&
         subBlock.value.length > 0
 
+      // Include legacy agent block fields (systemPrompt, userPrompt, memories) even if not in current config
+      // This ensures backward compatibility with old workflows that were exported before the messages array migration
+      const isLegacyAgentField =
+        isAgentBlock && ['systemPrompt', 'userPrompt', 'memories'].includes(id)
+
+      const anyConditionMet =
+        matchingConfigs.length === 0
+          ? true
+          : matchingConfigs.some(
+              (config) =>
+                shouldIncludeField(config, isAdvancedMode) &&
+                evaluateCondition(config.condition, allValues)
+            )
+
       if (
-        subBlockConfig &&
-        (shouldIncludeField(subBlockConfig, isAdvancedMode) || hasStarterInputFormatValues)
+        (matchingConfigs.length > 0 && anyConditionMet) ||
+        hasStarterInputFormatValues ||
+        isLegacyAgentField
       ) {
         params[id] = subBlock.value
       }
@@ -446,6 +495,11 @@ export class Serializer {
     blockConfig: any,
     params: Record<string, any>
   ) {
+    // Skip validation if the block is disabled
+    if (block.enabled === false) {
+      return
+    }
+
     // Skip validation if the block is used as a trigger
     if (
       block.triggerMode === true ||
@@ -487,75 +541,29 @@ export class Serializer {
     // Check required user-only parameters for the current tool
     const missingFields: string[] = []
 
-    // Helper function to evaluate conditions
-    const evalCond = (
-      condition:
-        | {
-            field: string
-            value: any
-            not?: boolean
-            and?: { field: string; value: any; not?: boolean }
-          }
-        | (() => {
-            field: string
-            value: any
-            not?: boolean
-            and?: { field: string; value: any; not?: boolean }
-          })
-        | undefined,
-      values: Record<string, any>
-    ): boolean => {
-      if (!condition) return true
-      const actual = typeof condition === 'function' ? condition() : condition
-      const fieldValue = values[actual.field]
-
-      const valueMatch = Array.isArray(actual.value)
-        ? fieldValue != null &&
-          (actual.not ? !actual.value.includes(fieldValue) : actual.value.includes(fieldValue))
-        : actual.not
-          ? fieldValue !== actual.value
-          : fieldValue === actual.value
-
-      const andMatch = !actual.and
-        ? true
-        : (() => {
-            const andFieldValue = values[actual.and!.field]
-            return Array.isArray(actual.and!.value)
-              ? andFieldValue != null &&
-                  (actual.and!.not
-                    ? !actual.and!.value.includes(andFieldValue)
-                    : actual.and!.value.includes(andFieldValue))
-              : actual.and!.not
-                ? andFieldValue !== actual.and!.value
-                : andFieldValue === actual.and!.value
-          })()
-
-      return valueMatch && andMatch
-    }
-
     // Iterate through the tool's parameters, not the block's subBlocks
     Object.entries(currentTool.params || {}).forEach(([paramId, paramConfig]) => {
       if (paramConfig.required && paramConfig.visibility === 'user-only') {
-        const subBlockConfig = blockConfig.subBlocks?.find((sb: any) => sb.id === paramId)
+        const matchingConfigs = blockConfig.subBlocks?.filter((sb: any) => sb.id === paramId) || []
 
         let shouldValidateParam = true
 
-        if (subBlockConfig) {
+        if (matchingConfigs.length > 0) {
           const isAdvancedMode = block.advancedMode ?? false
-          const includedByMode = shouldIncludeField(subBlockConfig, isAdvancedMode)
 
-          // Check visibility condition
-          const includedByCondition = evalCond(subBlockConfig.condition, params)
+          shouldValidateParam = matchingConfigs.some((subBlockConfig: any) => {
+            const includedByMode = shouldIncludeField(subBlockConfig, isAdvancedMode)
 
-          // Check if field is required based on its required condition (if it's a condition object)
-          const isRequired = (() => {
-            if (!subBlockConfig.required) return false
-            if (typeof subBlockConfig.required === 'boolean') return subBlockConfig.required
-            // If required is a condition object, evaluate it
-            return evalCond(subBlockConfig.required, params)
-          })()
+            const includedByCondition = evaluateCondition(subBlockConfig.condition, params)
 
-          shouldValidateParam = includedByMode && includedByCondition && isRequired
+            const isRequired = (() => {
+              if (!subBlockConfig.required) return false
+              if (typeof subBlockConfig.required === 'boolean') return subBlockConfig.required
+              return evaluateCondition(subBlockConfig.required, params)
+            })()
+
+            return includedByMode && includedByCondition && isRequired
+          })
         }
 
         if (!shouldValidateParam) {
@@ -564,7 +572,12 @@ export class Serializer {
 
         const fieldValue = params[paramId]
         if (fieldValue === undefined || fieldValue === null || fieldValue === '') {
-          const displayName = subBlockConfig?.title || paramId
+          const activeConfig = matchingConfigs.find(
+            (config: any) =>
+              shouldIncludeField(config, block.advancedMode ?? false) &&
+              evaluateCondition(config.condition, params)
+          )
+          const displayName = activeConfig?.title || paramId
           missingFields.push(displayName)
         }
       }
@@ -592,7 +605,7 @@ export class Serializer {
       const accessibleIds = new Set<string>(ancestorIds)
       accessibleIds.add(blockId)
 
-      if (starterBlock) {
+      if (starterBlock && ancestorIds.includes(starterBlock.id)) {
         accessibleIds.add(starterBlock.id)
       }
 
@@ -676,6 +689,11 @@ export class Serializer {
         value: serializedBlock.config.params[subBlock.id] ?? null,
       }
     })
+
+    // Migration logic for agent blocks: Transform old systemPrompt/userPrompt to messages array
+    if (blockType === 'agent') {
+      migrateAgentParamsToMessages(serializedBlock.config.params, subBlocks, serializedBlock.id)
+    }
 
     return {
       id: serializedBlock.id,

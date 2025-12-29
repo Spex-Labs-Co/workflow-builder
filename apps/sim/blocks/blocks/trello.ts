@@ -41,7 +41,6 @@ export const TrelloBlock: BlockConfig<ToolResponse> = {
       id: 'credential',
       title: 'Trello Account',
       type: 'oauth-input',
-      provider: 'trello',
       serviceId: 'trello',
       requiredScopes: ['read', 'write'],
       placeholder: 'Select Trello account',
@@ -382,7 +381,6 @@ export const TrelloBlock: BlockConfig<ToolResponse> = {
     text: { type: 'string', description: 'Comment text' },
   },
   outputs: {
-    success: { type: 'boolean', description: 'Whether the operation was successful' },
     lists: {
       type: 'array',
       description: 'Array of list objects (for list_lists operation)',
@@ -405,11 +403,7 @@ export const TrelloBlock: BlockConfig<ToolResponse> = {
     },
     count: {
       type: 'number',
-      description: 'Number of items returned (boards, cards, actions)',
-    },
-    error: {
-      type: 'string',
-      description: 'Error message if operation failed',
+      description: 'Number of items returned (lists, cards, actions)',
     },
   },
 }

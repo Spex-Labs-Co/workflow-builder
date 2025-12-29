@@ -23,6 +23,8 @@ const FILTER_FIELDS = {
   workflow: 'string',
   trigger: 'string',
   execution: 'string',
+  executionId: 'string',
+  workflowId: 'string',
   id: 'string',
   cost: 'number',
   duration: 'number',
@@ -151,7 +153,9 @@ export function queryToApiParams(parsedQuery: ParsedQuery): Record<string, strin
       case 'level':
       case 'status':
         if (filter.operator === '=') {
-          params.level = filter.value as string
+          const existing = params.level ? params.level.split(',') : []
+          existing.push(filter.value as string)
+          params.level = existing.join(',')
         }
         break
 
@@ -213,11 +217,13 @@ export function queryToApiParams(parsedQuery: ParsedQuery): Record<string, strin
         break
 
       case 'cost':
-        params[`cost_${filter.operator}_${filter.value}`] = 'true'
+        params.costOperator = filter.operator
+        params.costValue = String(filter.value)
         break
 
       case 'duration':
-        params[`duration_${filter.operator}_${filter.value}`] = 'true'
+        params.durationOperator = filter.operator
+        params.durationValue = String(filter.value)
         break
     }
   }

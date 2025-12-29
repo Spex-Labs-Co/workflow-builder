@@ -1,7 +1,8 @@
-import type { Logger } from '@/lib/logs/console/logger'
+import type { Logger } from '@sim/logger'
 import type { StorageContext } from '@/lib/uploads'
+import { ACCEPTED_FILE_TYPES, SUPPORTED_DOCUMENT_EXTENSIONS } from '@/lib/uploads/utils/validation'
+import { isUuid } from '@/executor/constants'
 import type { UserFile } from '@/executor/types'
-import { ACCEPTED_FILE_TYPES } from './validation'
 
 export interface FileAttachment {
   id: string
@@ -12,7 +13,7 @@ export interface FileAttachment {
 }
 
 export interface MessageContent {
-  type: 'text' | 'image' | 'document'
+  type: 'text' | 'image' | 'document' | 'audio' | 'video'
   text?: string
   source?: {
     type: 'base64'
@@ -24,7 +25,7 @@ export interface MessageContent {
 /**
  * Mapping of MIME types to content types
  */
-export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document'> = {
+export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document' | 'audio' | 'video'> = {
   // Images
   'image/jpeg': 'image',
   'image/jpg': 'image',
@@ -49,12 +50,40 @@ export const MIME_TYPE_MAPPING: Record<string, 'image' | 'document'> = {
   'application/vnd.ms-powerpoint': 'document', // .ppt
   'text/markdown': 'document',
   'application/rtf': 'document',
+
+  // Audio
+  'audio/mpeg': 'audio', // .mp3
+  'audio/mp3': 'audio',
+  'audio/mp4': 'audio', // .m4a
+  'audio/x-m4a': 'audio',
+  'audio/m4a': 'audio',
+  'audio/wav': 'audio',
+  'audio/wave': 'audio',
+  'audio/x-wav': 'audio',
+  'audio/webm': 'audio',
+  'audio/ogg': 'audio',
+  'audio/vorbis': 'audio',
+  'audio/flac': 'audio',
+  'audio/x-flac': 'audio',
+  'audio/aac': 'audio',
+  'audio/x-aac': 'audio',
+  'audio/opus': 'audio',
+
+  // Video
+  'video/mp4': 'video',
+  'video/mpeg': 'video',
+  'video/quicktime': 'video', // .mov
+  'video/x-quicktime': 'video',
+  'video/x-msvideo': 'video', // .avi
+  'video/avi': 'video',
+  'video/x-matroska': 'video', // .mkv
+  'video/webm': 'video',
 }
 
 /**
  * Get the content type for a given MIME type
  */
-export function getContentType(mimeType: string): 'image' | 'document' | null {
+export function getContentType(mimeType: string): 'image' | 'document' | 'audio' | 'video' | null {
   return MIME_TYPE_MAPPING[mimeType.toLowerCase()] || null
 }
 
@@ -78,6 +107,28 @@ export function isImageFileType(mimeType: string): boolean {
     'image/svg+xml',
   ]
   return imageTypes.includes(mimeType.toLowerCase())
+}
+
+/**
+ * Check if a MIME type is an audio type
+ */
+export function isAudioFileType(mimeType: string): boolean {
+  return getContentType(mimeType) === 'audio'
+}
+
+/**
+ * Check if a MIME type is a video type
+ */
+export function isVideoFileType(mimeType: string): boolean {
+  return getContentType(mimeType) === 'video'
+}
+
+/**
+ * Check if a MIME type is an audio or video type
+ */
+export function isMediaFileType(mimeType: string): boolean {
+  const contentType = getContentType(mimeType)
+  return contentType === 'audio' || contentType === 'video'
 }
 
 /**
@@ -143,9 +194,94 @@ export function getMimeTypeFromExtension(extension: string): string {
     ppt: 'application/vnd.ms-powerpoint',
     md: 'text/markdown',
     rtf: 'application/rtf',
+
+    // Audio
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    wav: 'audio/wav',
+    webm: 'audio/webm',
+    ogg: 'audio/ogg',
+    flac: 'audio/flac',
+    aac: 'audio/aac',
+    opus: 'audio/opus',
+
+    // Video
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    avi: 'video/x-msvideo',
+    mkv: 'video/x-matroska',
   }
 
   return extensionMimeMap[extension.toLowerCase()] || 'application/octet-stream'
+}
+
+/**
+ * Get file extension from MIME type
+ * @param mimeType - MIME type string
+ * @returns File extension without dot, or null if not found
+ */
+export function getExtensionFromMimeType(mimeType: string): string | null {
+  const mimeToExtension: Record<string, string> = {
+    // Images
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+
+    // Documents
+    'application/pdf': 'pdf',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/json': 'json',
+    'application/xml': 'xml',
+    'text/xml': 'xml',
+    'text/html': 'html',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/msword': 'doc',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'text/markdown': 'md',
+    'application/rtf': 'rtf',
+
+    // Audio
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+    'audio/m4a': 'm4a',
+    'audio/wav': 'wav',
+    'audio/wave': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/webm': 'webm',
+    'audio/ogg': 'ogg',
+    'audio/vorbis': 'ogg',
+    'audio/flac': 'flac',
+    'audio/x-flac': 'flac',
+    'audio/aac': 'aac',
+    'audio/x-aac': 'aac',
+    'audio/opus': 'opus',
+
+    // Video
+    'video/mp4': 'mp4',
+    'video/mpeg': 'mpg',
+    'video/quicktime': 'mov',
+    'video/x-quicktime': 'mov',
+    'video/x-msvideo': 'avi',
+    'video/avi': 'avi',
+    'video/x-matroska': 'mkv',
+    'video/webm': 'webm',
+
+    // Archives
+    'application/zip': 'zip',
+    'application/x-zip-compressed': 'zip',
+    'application/gzip': 'gz',
+  }
+
+  return mimeToExtension[mimeType.toLowerCase()] || null
 }
 
 /**
@@ -192,15 +328,27 @@ export function validateKnowledgeBaseFile(
     return `File "${file.name}" is too large. Maximum size is ${maxSizeMB}MB.`
   }
 
-  if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
-    return `File "${file.name}" has an unsupported format. Please use PDF, DOC, DOCX, TXT, CSV, XLS, XLSX, MD, PPT, PPTX, HTML, JSON, YAML, or YML files.`
+  // Check MIME type first
+  if (ACCEPTED_FILE_TYPES.includes(file.type)) {
+    return null
   }
 
-  return null
+  // Fallback: check file extension (browsers often misidentify file types like .md)
+  const extension = getFileExtension(file.name)
+  if (
+    SUPPORTED_DOCUMENT_EXTENSIONS.includes(
+      extension as (typeof SUPPORTED_DOCUMENT_EXTENSIONS)[number]
+    )
+  ) {
+    return null
+  }
+
+  return `File "${file.name}" has an unsupported format. Please use PDF, DOC, DOCX, TXT, CSV, XLS, XLSX, MD, PPT, PPTX, HTML, JSON, YAML, or YML files.`
 }
 
 /**
  * Extract storage key from a file path
+ * Handles URLs like /api/files/serve/s3/key or /api/files/serve/blob/key
  */
 export function extractStorageKey(filePath: string): string {
   let pathWithoutQuery = filePath.split('?')[0]
@@ -215,7 +363,13 @@ export function extractStorageKey(filePath: string): string {
   }
 
   if (pathWithoutQuery.startsWith('/api/files/serve/')) {
-    return decodeURIComponent(pathWithoutQuery.substring('/api/files/serve/'.length))
+    let key = decodeURIComponent(pathWithoutQuery.substring('/api/files/serve/'.length))
+    if (key.startsWith('s3/')) {
+      key = key.substring(3)
+    } else if (key.startsWith('blob/')) {
+      key = key.substring(5)
+    }
+    return key
   }
   return pathWithoutQuery
 }
@@ -472,11 +626,9 @@ export function extractCleanFilename(urlOrPath: string): string {
 export function extractWorkspaceIdFromExecutionKey(key: string): string | null {
   const segments = key.split('/')
 
-  const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-
   if (segments[0] === 'execution' && segments.length >= 5) {
     const workspaceId = segments[1]
-    if (workspaceId && UUID_PATTERN.test(workspaceId)) {
+    if (workspaceId && isUuid(workspaceId)) {
       return workspaceId
     }
   }

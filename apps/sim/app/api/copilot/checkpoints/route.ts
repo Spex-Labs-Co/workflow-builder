@@ -1,5 +1,6 @@
 import { db } from '@sim/db'
 import { copilotChats, workflowCheckpoints } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, desc, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -9,8 +10,7 @@ import {
   createInternalServerErrorResponse,
   createRequestTracker,
   createUnauthorizedResponse,
-} from '@/lib/copilot/auth'
-import { createLogger } from '@/lib/logs/console/logger'
+} from '@/lib/copilot/request-helpers'
 
 const logger = createLogger('WorkflowCheckpointsAPI')
 

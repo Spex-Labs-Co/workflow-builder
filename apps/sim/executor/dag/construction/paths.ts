@@ -1,5 +1,5 @@
-import { createLogger } from '@/lib/logs/console/logger'
-import { isMetadataOnlyBlockType, isTriggerBlockType } from '@/executor/consts'
+import { createLogger } from '@sim/logger'
+import { isMetadataOnlyBlockType, isTriggerBlockType } from '@/executor/constants'
 import { extractBaseBlockId } from '@/executor/utils/subflow-utils'
 import type { SerializedBlock, SerializedWorkflow } from '@/serializer/types'
 
@@ -28,6 +28,24 @@ export class PathConstructor {
       const block = workflow.blocks.find((b) => b.id === triggerBlockId)
 
       if (block) {
+        if (!block.enabled) {
+          logger.error('Provided triggerBlockId is disabled, finding alternative', {
+            triggerBlockId,
+            blockEnabled: block.enabled,
+          })
+          // Try to find an alternative enabled trigger instead of failing
+          const alternativeTrigger = this.findExplicitTrigger(workflow)
+          if (alternativeTrigger) {
+            logger.info('Using alternative enabled trigger', {
+              disabledTriggerId: triggerBlockId,
+              alternativeTriggerId: alternativeTrigger,
+            })
+            return alternativeTrigger
+          }
+          throw new Error(
+            `Trigger block ${triggerBlockId} is disabled and no alternative enabled trigger found`
+          )
+        }
         return triggerBlockId
       }
 
@@ -95,8 +113,13 @@ export class PathConstructor {
 
   private buildAdjacencyMap(workflow: SerializedWorkflow): Map<string, string[]> {
     const adjacency = new Map<string, string[]>()
+    const enabledBlocks = new Set(workflow.blocks.filter((b) => b.enabled).map((b) => b.id))
 
     for (const connection of workflow.connections) {
+      if (!enabledBlocks.has(connection.source) || !enabledBlocks.has(connection.target)) {
+        continue
+      }
+
       const neighbors = adjacency.get(connection.source) ?? []
       neighbors.push(connection.target)
       adjacency.set(connection.source, neighbors)

@@ -1,5 +1,5 @@
+import { createLogger } from '@sim/logger'
 import { OutlookIcon } from '@/components/icons'
-import { createLogger } from '@/lib/logs/console/logger'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
 import type { TriggerConfig } from '@/triggers/types'
 
@@ -19,7 +19,7 @@ export const outlookPollingTrigger: TriggerConfig = {
       title: 'Credentials',
       type: 'oauth-input',
       description: 'This trigger requires outlook credentials to access your account.',
-      provider: 'outlook',
+      serviceId: 'outlook',
       requiredScopes: [],
       required: true,
       mode: 'trigger',

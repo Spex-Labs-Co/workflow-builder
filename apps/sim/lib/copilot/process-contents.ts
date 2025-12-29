@@ -1,10 +1,11 @@
 import { db } from '@sim/db'
 import { copilotChats, document, knowledgeBase, templates } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq, isNull } from 'drizzle-orm'
-import { createLogger } from '@/lib/logs/console/logger'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/db-helpers'
-import { sanitizeForCopilot } from '@/lib/workflows/json-sanitizer'
-import type { ChatContext } from '@/stores/panel-new/copilot/types'
+import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
+import { sanitizeForCopilot } from '@/lib/workflows/sanitization/json-sanitizer'
+import { escapeRegExp } from '@/executor/constants'
+import type { ChatContext } from '@/stores/panel/copilot/types'
 
 export type AgentContextType =
   | 'past_chat'
@@ -151,10 +152,6 @@ export async function processContextsServer(
     kinds: Array.from(filtered.reduce((s, r) => s.add(r.type), new Set<string>())),
   })
   return filtered
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function sanitizeMessageForDocs(rawMessage: string, contexts: ChatContext[] | undefined): string {

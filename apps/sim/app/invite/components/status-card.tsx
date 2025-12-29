@@ -14,8 +14,8 @@ import {
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { useBrandConfig } from '@/lib/branding/branding'
-import { inter } from '@/app/fonts/inter/inter'
-import { soehne } from '@/app/fonts/soehne/soehne'
+import { inter } from '@/app/_styles/fonts/inter/inter'
+import { soehne } from '@/app/_styles/fonts/soehne/soehne'
 
 interface InviteStatusCardProps {
   type: 'login' | 'loading' | 'error' | 'success' | 'invitation' | 'warning'
@@ -162,14 +162,7 @@ export function InviteStatusCard({
               onClick={action.onClick}
               disabled={action.disabled || action.loading}
             >
-              {action.loading ? (
-                <>
-                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                  {action.label}...
-                </>
-              ) : (
-                action.label
-              )}
+              {action.loading ? `${action.label}...` : action.label}
             </Button>
           ))}
         </div>

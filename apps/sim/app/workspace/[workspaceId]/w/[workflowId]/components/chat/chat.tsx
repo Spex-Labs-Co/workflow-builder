@@ -1,8 +1,16 @@
 'use client'
 
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, ArrowDownToLine, ArrowUp, MoreVertical, Paperclip, X } from 'lucide-react'
-import { useParams } from 'next/navigation'
+import { createLogger } from '@sim/logger'
+import {
+  AlertCircle,
+  ArrowDownToLine,
+  ArrowUp,
+  MoreVertical,
+  Paperclip,
+  Square,
+  X,
+} from 'lucide-react'
 import {
   Badge,
   Button,
@@ -14,22 +22,39 @@ import {
   PopoverTrigger,
   Trash,
 } from '@/components/emcn'
-import { createLogger } from '@/lib/logs/console/logger'
+import { useSession } from '@/lib/auth/auth-client'
+import { cn } from '@/lib/core/utils/cn'
 import {
   extractBlockIdFromOutputId,
   extractPathFromOutputId,
   parseOutputContentSafely,
-} from '@/lib/response-format'
-import { cn } from '@/lib/utils'
-import { useScrollManagement } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
+} from '@/lib/core/utils/response-format'
+import { normalizeInputFormatValue } from '@/lib/workflows/input-format-utils'
+import { StartBlockPath, TriggerUtils } from '@/lib/workflows/triggers/triggers'
+import { START_BLOCK_RESERVED_FIELDS } from '@/lib/workflows/types'
+import {
+  ChatMessage,
+  OutputSelect,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/components/chat/components'
+import { useChatFileUpload } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/chat/hooks'
+import {
+  usePreventZoom,
+  useScrollManagement,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
+import {
+  useFloatBoundarySync,
+  useFloatDrag,
+  useFloatResize,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-float'
 import { useWorkflowExecution } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-workflow-execution'
 import type { BlockLog, ExecutionResult } from '@/executor/types'
 import { getChatPosition, useChatStore } from '@/stores/chat/store'
 import { useExecutionStore } from '@/stores/execution/store'
+import { useOperationQueue } from '@/stores/operation-queue/store'
 import { useTerminalConsoleStore } from '@/stores/terminal'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-import { ChatMessage, OutputSelect } from './components'
-import { useChatBoundarySync, useChatDrag, useChatFileUpload, useChatResize } from './hooks'
+import { useSubBlockStore } from '@/stores/workflows/subblock/store'
+import { useWorkflowStore } from '@/stores/workflows/workflow/store'
 
 const logger = createLogger('FloatingChat')
 
@@ -46,11 +71,33 @@ const formatFileSize = (bytes: number): string => {
 }
 
 /**
+ * Represents a chat file attachment before processing
+ */
+interface ChatFile {
+  id: string
+  name: string
+  type: string
+  size: number
+  file: File
+}
+
+/**
+ * Represents a processed file attachment with data URL for display
+ */
+interface ProcessedAttachment {
+  id: string
+  name: string
+  type: string
+  size: number
+  dataUrl: string
+}
+
+/**
  * Reads files and converts them to data URLs for image display
  * @param chatFiles - Array of chat files to process
  * @returns Promise resolving to array of files with data URLs for images
  */
-const processFileAttachments = async (chatFiles: any[]) => {
+const processFileAttachments = async (chatFiles: ChatFile[]): Promise<ProcessedAttachment[]> => {
   return Promise.all(
     chatFiles.map(async (file) => {
       let dataUrl = ''
@@ -83,7 +130,7 @@ const processFileAttachments = async (chatFiles: any[]) => {
  * @param outputId - Output identifier in format blockId or blockId.path
  * @returns Extracted output value or undefined if not found
  */
-const extractOutputFromLogs = (logs: BlockLog[] | undefined, outputId: string): any | undefined => {
+const extractOutputFromLogs = (logs: BlockLog[] | undefined, outputId: string): unknown => {
   const blockId = extractBlockIdFromOutputId(outputId)
   const path = extractPathFromOutputId(outputId, blockId)
   const log = logs?.find((l) => l.blockId === blockId)
@@ -114,7 +161,7 @@ const extractOutputFromLogs = (logs: BlockLog[] | undefined, outputId: string): 
  * @param output - Output value to format (string, object, or other)
  * @returns Formatted string, markdown code block for objects, or empty string
  */
-const formatOutputContent = (output: any): string => {
+const formatOutputContent = (output: unknown): string => {
   if (typeof output === 'string') {
     return output
   }
@@ -122,6 +169,17 @@ const formatOutputContent = (output: any): string => {
     return `\`\`\`json\n${JSON.stringify(output, null, 2)}\n\`\`\``
   }
   return ''
+}
+
+/**
+ * Represents a field in the start block's input format configuration
+ */
+interface StartInputFormatField {
+  id?: string
+  name?: string
+  type?: string
+  value?: unknown
+  collapsed?: boolean
 }
 
 /**
@@ -137,9 +195,10 @@ const formatOutputContent = (output: any): string => {
  * position across sessions using the floating chat store.
  */
 export function Chat() {
-  const params = useParams()
-  const workspaceId = params.workspaceId as string
   const { activeWorkflowId } = useWorkflowRegistry()
+  const blocks = useWorkflowStore((state) => state.blocks)
+  const triggerWorkflowUpdate = useWorkflowStore((state) => state.triggerUpdate)
+  const setSubBlockValue = useSubBlockStore((state) => state.setValue)
 
   // Chat state (UI and messages from unified store)
   const {
@@ -163,17 +222,21 @@ export function Chat() {
 
   const { entries } = useTerminalConsoleStore()
   const { isExecuting } = useExecutionStore()
-  const { handleRunWorkflow } = useWorkflowExecution()
+  const { handleRunWorkflow, handleCancelExecution } = useWorkflowExecution()
+  const { data: session } = useSession()
+  const { addToQueue } = useOperationQueue()
 
   // Local state
   const [chatMessage, setChatMessage] = useState('')
   const [promptHistory, setPromptHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+  const preventZoomRef = usePreventZoom()
 
   // File upload hook
   const {
@@ -190,6 +253,71 @@ export function Chat() {
     handleDrop,
   } = useChatFileUpload()
 
+  /**
+   * Resolves the unified start block for chat execution, if available.
+   */
+  const startBlockCandidate = useMemo(() => {
+    if (!activeWorkflowId) {
+      return null
+    }
+
+    if (!blocks || Object.keys(blocks).length === 0) {
+      return null
+    }
+
+    const candidate = TriggerUtils.findStartBlock(blocks, 'chat')
+    if (!candidate || candidate.path !== StartBlockPath.UNIFIED) {
+      return null
+    }
+
+    return candidate
+  }, [activeWorkflowId, blocks])
+
+  const startBlockId = startBlockCandidate?.blockId ?? null
+
+  /**
+   * Reads the current input format for the unified start block from the subblock store,
+   * falling back to the workflow store if no explicit value is stored yet.
+   */
+  const startBlockInputFormat = useSubBlockStore((state) => {
+    if (!activeWorkflowId || !startBlockId) {
+      return null
+    }
+
+    const workflowValues = state.workflowValues[activeWorkflowId]
+    const fromStore = workflowValues?.[startBlockId]?.inputFormat
+    if (fromStore !== undefined && fromStore !== null) {
+      return fromStore
+    }
+
+    const startBlock = blocks[startBlockId]
+    return startBlock?.subBlocks?.inputFormat?.value ?? null
+  })
+
+  /**
+   * Determines which reserved start inputs are missing from the input format.
+   */
+  const missingStartReservedFields = useMemo(() => {
+    if (!startBlockId) {
+      return START_BLOCK_RESERVED_FIELDS
+    }
+
+    const normalizedFields = normalizeInputFormatValue(startBlockInputFormat)
+    const existingNames = new Set(
+      normalizedFields
+        .map((field) => field.name)
+        .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+        .map((name) => name.trim().toLowerCase())
+    )
+
+    return START_BLOCK_RESERVED_FIELDS.filter(
+      (fieldName) => !existingNames.has(fieldName.toLowerCase())
+    )
+  }, [startBlockId, startBlockInputFormat])
+
+  const shouldShowConfigureStartInputsButton =
+    Boolean(startBlockId) && missingStartReservedFields.length > 0
+
   // Get actual position (default if not set)
   const actualPosition = useMemo(
     () => getChatPosition(chatPosition, chatWidth, chatHeight),
@@ -197,7 +325,7 @@ export function Chat() {
   )
 
   // Drag hook
-  const { handleMouseDown } = useChatDrag({
+  const { handleMouseDown } = useFloatDrag({
     position: actualPosition,
     width: chatWidth,
     height: chatHeight,
@@ -205,7 +333,7 @@ export function Chat() {
   })
 
   // Boundary sync hook - keeps chat within bounds when layout changes
-  useChatBoundarySync({
+  useFloatBoundarySync({
     isOpen: isChatOpen,
     position: actualPosition,
     width: chatWidth,
@@ -219,7 +347,7 @@ export function Chat() {
     handleMouseMove: handleResizeMouseMove,
     handleMouseLeave: handleResizeMouseLeave,
     handleMouseDown: handleResizeMouseDown,
-  } = useChatResize({
+  } = useFloatResize({
     position: actualPosition,
     width: chatWidth,
     height: chatHeight,
@@ -257,7 +385,14 @@ export function Chat() {
   }, [workflowMessages])
 
   // Scroll management hook - reuse copilot's implementation
-  const { scrollAreaRef, scrollToBottom } = useScrollManagement(messagesForScrollHook, isStreaming)
+  // Use immediate scroll behavior to keep the view pinned to the bottom during streaming
+  const { scrollAreaRef, scrollToBottom } = useScrollManagement(
+    messagesForScrollHook,
+    isStreaming,
+    {
+      behavior: 'auto',
+    }
+  )
 
   // Memoize user messages for performance
   const userMessages = useMemo(() => {
@@ -297,6 +432,7 @@ export function Chat() {
 
   /**
    * Focuses the input field with optional delay
+   * @param delay - Delay in milliseconds before focusing (default: 0)
    */
   const focusInput = useCallback((delay = 0) => {
     timeoutRef.current && clearTimeout(timeoutRef.current)
@@ -312,18 +448,41 @@ export function Chat() {
   useEffect(() => {
     return () => {
       timeoutRef.current && clearTimeout(timeoutRef.current)
-      abortControllerRef.current?.abort()
+      streamReaderRef.current?.cancel()
     }
   }, [])
 
+  // React to execution cancellation from run button
+  useEffect(() => {
+    if (!isExecuting && isStreaming) {
+      const lastMessage = workflowMessages[workflowMessages.length - 1]
+      if (lastMessage?.isStreaming) {
+        streamReaderRef.current?.cancel()
+        streamReaderRef.current = null
+        finalizeMessageStream(lastMessage.id)
+      }
+    }
+  }, [isExecuting, isStreaming, workflowMessages, finalizeMessageStream])
+
+  const handleStopStreaming = useCallback(() => {
+    streamReaderRef.current?.cancel()
+    streamReaderRef.current = null
+    handleCancelExecution()
+  }, [handleCancelExecution])
+
   /**
    * Processes streaming response from workflow execution
+   * Reads the stream chunk by chunk and updates the message content in real-time
+   * @param stream - ReadableStream containing the workflow execution response
+   * @param responseMessageId - ID of the message to update with streamed content
    */
   const processStreamingResponse = useCallback(
     async (stream: ReadableStream, responseMessageId: string) => {
       const reader = stream.getReader()
+      streamReaderRef.current = reader
       const decoder = new TextDecoder()
       let accumulatedContent = ''
+      let buffer = ''
 
       try {
         while (true) {
@@ -333,8 +492,19 @@ export function Chat() {
             break
           }
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n\n')
+          const chunk = decoder.decode(value, { stream: true })
+          buffer += chunk
+
+          // Process only complete SSE messages; keep any partial trailing data in buffer
+          const separatorIndex = buffer.lastIndexOf('\n\n')
+          if (separatorIndex === -1) {
+            continue
+          }
+
+          const processable = buffer.slice(0, separatorIndex)
+          buffer = buffer.slice(separatorIndex + 2)
+
+          const lines = processable.split('\n\n')
 
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue
@@ -370,8 +540,15 @@ export function Chat() {
           }
         }
       } catch (error) {
-        logger.error('Error processing stream:', error)
+        if ((error as Error)?.name !== 'AbortError') {
+          logger.error('Error processing stream:', error)
+        }
+        finalizeMessageStream(responseMessageId)
       } finally {
+        // Only clear ref if it's still our reader (prevents clobbering a new stream)
+        if (streamReaderRef.current === reader) {
+          streamReaderRef.current = null
+        }
         focusInput(100)
       }
     },
@@ -380,10 +557,12 @@ export function Chat() {
 
   /**
    * Handles workflow execution response
+   * @param result - The workflow execution result containing stream or logs
    */
   const handleWorkflowResponse = useCallback(
-    (result: any) => {
+    (result: unknown) => {
       if (!result || !activeWorkflowId) return
+      if (typeof result !== 'object') return
 
       // Handle streaming response
       if ('stream' in result && result.stream instanceof ReadableStream) {
@@ -400,9 +579,9 @@ export function Chat() {
       }
 
       // Handle success with logs
-      if ('success' in result && result.success && 'logs' in result) {
+      if ('success' in result && result.success && 'logs' in result && Array.isArray(result.logs)) {
         selectedOutputs
-          .map((outputId) => extractOutputFromLogs(result.logs, outputId))
+          .map((outputId) => extractOutputFromLogs(result.logs as BlockLog[], outputId))
           .filter((output) => output !== undefined)
           .forEach((output) => {
             const content = formatOutputContent(output)
@@ -419,7 +598,10 @@ export function Chat() {
 
       // Handle error response
       if ('success' in result && !result.success) {
-        const errorMessage = 'error' in result ? result.error : 'Workflow execution failed.'
+        const errorMessage =
+          'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Workflow execution failed.'
         addMessage({
           content: `Error: ${errorMessage}`,
           workflowId: activeWorkflowId,
@@ -432,6 +614,8 @@ export function Chat() {
 
   /**
    * Sends a chat message and executes the workflow
+   * Processes file attachments, adds the user message to the chat,
+   * and triggers workflow execution with the message as input
    */
   const handleSendMessage = useCallback(async () => {
     if ((!chatMessage.trim() && chatFiles.length === 0) || !activeWorkflowId || isExecuting) return
@@ -443,10 +627,6 @@ export function Chat() {
       setPromptHistory((prev) => [...prev, sentMessage])
     }
     setHistoryIndex(-1)
-
-    // Reset abort controller
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = new AbortController()
 
     const conversationId = getConversationId(activeWorkflowId)
 
@@ -465,7 +645,12 @@ export function Chat() {
       })
 
       // Prepare workflow input
-      const workflowInput: any = {
+      const workflowInput: {
+        input: string
+        conversationId: string
+        files?: Array<{ name: string; size: number; type: string; file: File }>
+        onUploadError?: (message: string) => void
+      } = {
         input: sentMessage,
         conversationId,
       }
@@ -513,6 +698,8 @@ export function Chat() {
 
   /**
    * Handles keyboard input for chat
+   * Supports Enter to send, ArrowUp/Down to navigate prompt history
+   * @param e - Keyboard event from the input field
    */
   const handleKeyPress = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -546,6 +733,8 @@ export function Chat() {
 
   /**
    * Handles output selection changes
+   * Deduplicates and stores selected workflow outputs for the current workflow
+   * @param values - Array of selected output IDs or labels
    */
   const handleOutputSelection = useCallback(
     (values: string[]) => {
@@ -564,12 +753,73 @@ export function Chat() {
     setIsChatOpen(false)
   }, [setIsChatOpen])
 
-  // Don't render if not open
+  /**
+   * Adds any missing reserved inputs (input, conversationId, files) to the unified start block.
+   */
+  const handleConfigureStartInputs = useCallback(() => {
+    if (!activeWorkflowId || !startBlockId) {
+      logger.warn('Cannot configure start inputs: missing active workflow ID or start block ID')
+      return
+    }
+
+    try {
+      const normalizedExisting = normalizeInputFormatValue(startBlockInputFormat)
+
+      const newReservedFields: StartInputFormatField[] = missingStartReservedFields.map(
+        (fieldName) => {
+          const defaultType = fieldName === 'files' ? 'files' : 'string'
+
+          return {
+            id: crypto.randomUUID(),
+            name: fieldName,
+            type: defaultType,
+            value: '',
+            collapsed: false,
+          }
+        }
+      )
+
+      const updatedFields: StartInputFormatField[] = [...newReservedFields, ...normalizedExisting]
+
+      setSubBlockValue(startBlockId, 'inputFormat', updatedFields)
+
+      const userId = session?.user?.id || 'unknown'
+      addToQueue({
+        id: crypto.randomUUID(),
+        operation: {
+          operation: 'subblock-update',
+          target: 'subblock',
+          payload: {
+            blockId: startBlockId,
+            subblockId: 'inputFormat',
+            value: updatedFields,
+          },
+        },
+        workflowId: activeWorkflowId,
+        userId,
+      })
+
+      triggerWorkflowUpdate()
+    } catch (error) {
+      logger.error('Failed to configure start block reserved inputs', error)
+    }
+  }, [
+    activeWorkflowId,
+    missingStartReservedFields,
+    setSubBlockValue,
+    startBlockId,
+    startBlockInputFormat,
+    triggerWorkflowUpdate,
+    session,
+    addToQueue,
+  ])
+
   if (!isChatOpen) return null
 
   return (
     <div
-      className='fixed z-30 flex flex-col overflow-hidden rounded-[6px] border border-[var(--border)] bg-[var(--surface-1)] px-[10px] pt-[2px] pb-[8px]'
+      ref={preventZoomRef}
+      className='fixed z-30 flex flex-col overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)] px-[10px] pt-[2px] pb-[8px]'
       style={{
         left: `${actualPosition.x}px`,
         top: `${actualPosition.y}px`,
@@ -583,29 +833,46 @@ export function Chat() {
     >
       {/* Header with drag handle */}
       <div
-        className='flex h-[32px] flex-shrink-0 cursor-grab items-center justify-between bg-[var(--surface-1)] p-0 active:cursor-grabbing'
+        className='flex h-[32px] flex-shrink-0 cursor-grab items-center justify-between gap-[10px] bg-[var(--surface-1)] p-0 active:cursor-grabbing'
         onMouseDown={handleMouseDown}
       >
-        <div className='flex items-center'>
-          <span className='flex-shrink-0 font-medium text-[14px] text-[var(--text-primary)]'>
-            Chat
-          </span>
-        </div>
+        <span className='flex-shrink-0 pr-[2px] font-medium text-[14px] text-[var(--text-primary)]'>
+          Chat
+        </span>
 
-        {/* Output selector - centered with mx-auto */}
-        <div className='mr-[6px] ml-auto' onMouseDown={(e) => e.stopPropagation()}>
+        {/* Start inputs button and output selector - with max-width to prevent overflow */}
+        <div
+          className='ml-auto flex min-w-0 flex-shrink items-center gap-[6px]'
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {shouldShowConfigureStartInputsButton && (
+            <Badge
+              variant='outline'
+              className='flex-none cursor-pointer whitespace-nowrap rounded-[6px]'
+              title='Add chat inputs to Start block'
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                handleConfigureStartInputs()
+              }}
+            >
+              <span className='whitespace-nowrap text-[12px]'>Add inputs</span>
+            </Badge>
+          )}
+
           <OutputSelect
             workflowId={activeWorkflowId}
             selectedOutputs={selectedOutputs}
             onOutputSelect={handleOutputSelection}
             disabled={!activeWorkflowId}
             placeholder='Select outputs'
+            align='end'
+            maxHeight={180}
           />
         </div>
 
-        <div className='flex items-center gap-[8px]'>
+        <div className='flex flex-shrink-0 items-center gap-[8px]'>
           {/* More menu with actions */}
-          <Popover variant='default'>
+          <Popover variant='default' open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant='ghost'
@@ -624,23 +891,23 @@ export function Chat() {
             >
               <PopoverScrollArea>
                 <PopoverItem
-                  onClick={(e) => {
-                    e.stopPropagation()
+                  onClick={() => {
                     if (activeWorkflowId) exportChatCSV(activeWorkflowId)
+                    setMoreMenuOpen(false)
                   }}
-                  disabled={messages.length === 0}
+                  disabled={workflowMessages.length === 0}
                 >
-                  <ArrowDownToLine className='h-[14px] w-[14px]' />
+                  <ArrowDownToLine className='h-[13px] w-[13px]' />
                   <span>Download</span>
                 </PopoverItem>
                 <PopoverItem
-                  onClick={(e) => {
-                    e.stopPropagation()
+                  onClick={() => {
                     if (activeWorkflowId) clearChat(activeWorkflowId)
+                    setMoreMenuOpen(false)
                   }}
-                  disabled={messages.length === 0}
+                  disabled={workflowMessages.length === 0}
                 >
-                  <Trash className='h-[14px] w-[14px]' />
+                  <Trash className='h-[13px] w-[13px]' />
                   <span>Clear</span>
                 </PopoverItem>
               </PopoverScrollArea>
@@ -706,8 +973,8 @@ export function Chat() {
 
           {/* Combined input container */}
           <div
-            className={`rounded-[4px] border bg-[var(--surface-9)] py-0 pr-[6px] pl-[4px] transition-colors ${
-              isDragOver ? 'border-[var(--brand-secondary)]' : 'border-[var(--surface-11)]'
+            className={`rounded-[4px] border bg-[var(--surface-5)] py-0 pr-[6px] pl-[4px] transition-colors ${
+              isDragOver ? 'border-[var(--brand-secondary)]' : 'border-[var(--border-1)]'
             }`}
           >
             {/* File thumbnails */}
@@ -790,22 +1057,31 @@ export function Chat() {
                   <Paperclip className='!h-3.5 !w-3.5' />
                 </Badge>
 
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={
-                    (!chatMessage.trim() && chatFiles.length === 0) ||
-                    !activeWorkflowId ||
-                    isExecuting
-                  }
-                  className={cn(
-                    'h-[22px] w-[22px] rounded-full p-0 transition-colors',
-                    chatMessage.trim() || chatFiles.length > 0
-                      ? '!bg-[var(--c-C0C0C0)] hover:!bg-[var(--c-D0D0D0)]'
-                      : '!bg-[var(--c-C0C0C0)]'
-                  )}
-                >
-                  <ArrowUp className='h-3.5 w-3.5 text-black' strokeWidth={2.25} />
-                </Button>
+                {isStreaming ? (
+                  <Button
+                    onClick={handleStopStreaming}
+                    className='!bg-[var(--c-C0C0C0)] hover:!bg-[var(--c-D0D0D0)] h-[22px] w-[22px] rounded-full p-0 transition-colors'
+                  >
+                    <Square className='h-2.5 w-2.5 fill-black text-black' />
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleSendMessage}
+                    disabled={
+                      (!chatMessage.trim() && chatFiles.length === 0) ||
+                      !activeWorkflowId ||
+                      isExecuting
+                    }
+                    className={cn(
+                      'h-[22px] w-[22px] rounded-full p-0 transition-colors',
+                      chatMessage.trim() || chatFiles.length > 0
+                        ? '!bg-[var(--c-C0C0C0)] hover:!bg-[var(--c-D0D0D0)]'
+                        : '!bg-[var(--c-C0C0C0)]'
+                    )}
+                  >
+                    <ArrowUp className='h-3.5 w-3.5 text-black' strokeWidth={2.25} />
+                  </Button>
+                )}
               </div>
             </div>
 

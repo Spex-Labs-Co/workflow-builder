@@ -1,3 +1,4 @@
+import { createLogger } from '@sim/logger'
 import { Globe, Loader2, MinusCircle, XCircle } from 'lucide-react'
 import {
   BaseClientTool,
@@ -5,7 +6,6 @@ import {
   ClientToolCallState,
 } from '@/lib/copilot/tools/client/base-tool'
 import { ExecuteResponseSuccessSchema } from '@/lib/copilot/tools/shared/schemas'
-import { createLogger } from '@/lib/logs/console/logger'
 
 interface SearchOnlineArgs {
   query: string
@@ -31,6 +31,28 @@ export class SearchOnlineClientTool extends BaseClientTool {
       [ClientToolCallState.error]: { text: 'Failed to search online', icon: XCircle },
       [ClientToolCallState.rejected]: { text: 'Skipped online search', icon: MinusCircle },
       [ClientToolCallState.aborted]: { text: 'Aborted online search', icon: XCircle },
+    },
+    getDynamicText: (params, state) => {
+      if (params?.query && typeof params.query === 'string') {
+        const query = params.query
+        const truncated = query.length > 50 ? `${query.slice(0, 50)}...` : query
+
+        switch (state) {
+          case ClientToolCallState.success:
+            return `Searched online for ${truncated}`
+          case ClientToolCallState.executing:
+          case ClientToolCallState.generating:
+          case ClientToolCallState.pending:
+            return `Searching online for ${truncated}`
+          case ClientToolCallState.error:
+            return `Failed to search online for ${truncated}`
+          case ClientToolCallState.aborted:
+            return `Aborted searching online for ${truncated}`
+          case ClientToolCallState.rejected:
+            return `Skipped searching online for ${truncated}`
+        }
+      }
+      return undefined
     },
   }
 

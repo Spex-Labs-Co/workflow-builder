@@ -1,28 +1,47 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { useParams } from 'next/navigation'
 import { Handle, type NodeProps, Position, useUpdateNodeInternals } from 'reactflow'
-import { Badge } from '@/components/emcn/components/badge/badge'
-import { Tooltip } from '@/components/emcn/components/tooltip/tooltip'
-import { getEnv, isTruthy } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
-import { cn } from '@/lib/utils'
+import { Badge, Tooltip } from '@/components/emcn'
+import { getEnv, isTruthy } from '@/lib/core/config/env'
+import { cn } from '@/lib/core/utils/cn'
+import { getBaseUrl } from '@/lib/core/utils/urls'
+import { createMcpToolId } from '@/lib/mcp/utils'
+import { getProviderIdFromServiceId } from '@/lib/oauth'
 import { useUserPermissionsContext } from '@/app/workspace/[workspaceId]/providers/workspace-permissions-provider'
-import { useBlockCore } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
+import {
+  ActionBar,
+  Connections,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/components'
+import {
+  useBlockProperties,
+  useChildWorkflow,
+  useScheduleInfo,
+  useWebhookInfo,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/hooks'
+import type { WorkflowBlockProps } from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/types'
+import {
+  getProviderName,
+  shouldSkipBlockRender,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/components/workflow-block/utils'
+import { useBlockVisual } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
 import {
   BLOCK_DIMENSIONS,
+  HANDLE_POSITIONS,
   useBlockDimensions,
 } from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks/use-block-dimensions'
 import { SELECTOR_TYPES_HYDRATION_REQUIRED, type SubBlockConfig } from '@/blocks/types'
+import { getDependsOnFields } from '@/blocks/utils'
+import { useMcpServers, useMcpToolsQuery } from '@/hooks/queries/mcp'
+import { useCredentialName } from '@/hooks/queries/oauth-credentials'
 import { useCollaborativeWorkflow } from '@/hooks/use-collaborative-workflow'
-import { useCredentialDisplay } from '@/hooks/use-credential-display'
-import { useDisplayName } from '@/hooks/use-display-name'
+import { useKnowledgeBaseName } from '@/hooks/use-knowledge-base-name'
+import { useSelectorDisplayName } from '@/hooks/use-selector-display-name'
 import { useVariablesStore } from '@/stores/panel/variables/store'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { useSubBlockStore } from '@/stores/workflows/subblock/store'
-import { ActionBar, Connections } from './components'
-import { useBlockProperties, useChildWorkflow, useScheduleInfo, useWebhookInfo } from './hooks'
-import type { WorkflowBlockProps } from './types'
-import { getProviderName, shouldSkipBlockRender } from './utils'
+import { useWorkflowStore } from '@/stores/workflows/workflow/store'
+import { wouldCreateCycle } from '@/stores/workflows/workflow/utils'
 
 const logger = createLogger('WorkflowBlock')
 
@@ -97,21 +116,129 @@ const isVariableAssignmentsArray = (
 }
 
 /**
+ * Type guard for agent messages array
+ */
+const isMessagesArray = (value: unknown): value is Array<{ role: string; content: string }> => {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'role' in item &&
+        'content' in item &&
+        typeof item.role === 'string' &&
+        typeof item.content === 'string'
+    )
+  )
+}
+
+/**
+ * Type guard for tag filter array (used in knowledge block filters)
+ */
+interface TagFilterItem {
+  id: string
+  tagName: string
+  fieldType?: string
+  operator?: string
+  tagValue: string
+}
+
+const isTagFilterArray = (value: unknown): value is TagFilterItem[] => {
+  if (!Array.isArray(value) || value.length === 0) return false
+  const firstItem = value[0]
+  return (
+    typeof firstItem === 'object' &&
+    firstItem !== null &&
+    'tagName' in firstItem &&
+    'tagValue' in firstItem
+  )
+}
+
+/**
+ * Type guard for document tag entry array (used in knowledge block create document)
+ */
+interface DocumentTagItem {
+  id: string
+  tagName: string
+  fieldType?: string
+  value: string
+}
+
+const isDocumentTagArray = (value: unknown): value is DocumentTagItem[] => {
+  if (!Array.isArray(value) || value.length === 0) return false
+  const firstItem = value[0]
+  return (
+    typeof firstItem === 'object' &&
+    firstItem !== null &&
+    'tagName' in firstItem &&
+    'value' in firstItem &&
+    !('tagValue' in firstItem) // Distinguish from tag filters
+  )
+}
+
+/**
+ * Attempts to parse a JSON string, returns the parsed value or the original value if parsing fails
+ */
+const tryParseJson = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value
+  try {
+    const trimmed = value.trim()
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      return JSON.parse(trimmed)
+    }
+  } catch {
+    // Not valid JSON, return original
+  }
+  return value
+}
+
+/**
  * Formats a subblock value for display, intelligently handling nested objects and arrays.
  */
 const getDisplayValue = (value: unknown): string => {
   if (value == null || value === '') return '-'
 
-  if (isVariableAssignmentsArray(value)) {
-    const names = value.map((a) => a.variableName).filter((name): name is string => !!name)
+  // Try parsing JSON strings first
+  const parsedValue = tryParseJson(value)
+
+  if (isMessagesArray(parsedValue)) {
+    const firstMessage = parsedValue[0]
+    if (!firstMessage?.content || firstMessage.content.trim() === '') return '-'
+    const content = firstMessage.content.trim()
+    return content.length > 50 ? `${content.slice(0, 50)}...` : content
+  }
+
+  if (isVariableAssignmentsArray(parsedValue)) {
+    const names = parsedValue.map((a) => a.variableName).filter((name): name is string => !!name)
     if (names.length === 0) return '-'
     if (names.length === 1) return names[0]
     if (names.length === 2) return `${names[0]}, ${names[1]}`
     return `${names[0]}, ${names[1]} +${names.length - 2}`
   }
 
-  if (isTableRowArray(value)) {
-    const nonEmptyRows = value.filter((row) => {
+  if (isTagFilterArray(parsedValue)) {
+    const validFilters = parsedValue.filter((f) => f.tagName?.trim())
+    if (validFilters.length === 0) return '-'
+    if (validFilters.length === 1) return validFilters[0].tagName
+    if (validFilters.length === 2) return `${validFilters[0].tagName}, ${validFilters[1].tagName}`
+    return `${validFilters[0].tagName}, ${validFilters[1].tagName} +${validFilters.length - 2}`
+  }
+
+  if (isDocumentTagArray(parsedValue)) {
+    const validTags = parsedValue.filter((t) => t.tagName?.trim())
+    if (validTags.length === 0) return '-'
+    if (validTags.length === 1) return validTags[0].tagName
+    if (validTags.length === 2) return `${validTags[0].tagName}, ${validTags[1].tagName}`
+    return `${validTags[0].tagName}, ${validTags[1].tagName} +${validTags.length - 2}`
+  }
+
+  if (isTableRowArray(parsedValue)) {
+    const nonEmptyRows = parsedValue.filter((row) => {
       const cellValues = Object.values(row.cells)
       return cellValues.some((cell) => cell && cell.trim() !== '')
     })
@@ -130,16 +257,16 @@ const getDisplayValue = (value: unknown): string => {
     return `${nonEmptyRows.length} rows`
   }
 
-  if (isFieldFormatArray(value)) {
-    const namedFields = value.filter((field) => field.name && field.name.trim() !== '')
+  if (isFieldFormatArray(parsedValue)) {
+    const namedFields = parsedValue.filter((field) => field.name && field.name.trim() !== '')
     if (namedFields.length === 0) return '-'
     if (namedFields.length === 1) return namedFields[0].name
     if (namedFields.length === 2) return `${namedFields[0].name}, ${namedFields[1].name}`
     return `${namedFields[0].name}, ${namedFields[1].name} +${namedFields.length - 2}`
   }
 
-  if (isPlainObject(value)) {
-    const entries = Object.entries(value).filter(
+  if (isPlainObject(parsedValue)) {
+    const entries = Object.entries(parsedValue).filter(
       ([, val]) => val !== null && val !== undefined && val !== ''
     )
 
@@ -156,8 +283,10 @@ const getDisplayValue = (value: unknown): string => {
     return entries.length > 2 ? `${preview} +${entries.length - 2}` : preview
   }
 
-  if (Array.isArray(value)) {
-    const nonEmptyItems = value.filter((item) => item !== null && item !== undefined && item !== '')
+  if (Array.isArray(parsedValue)) {
+    const nonEmptyItems = parsedValue.filter(
+      (item) => item !== null && item !== undefined && item !== ''
+    )
     if (nonEmptyItems.length === 0) return '-'
 
     const getItemDisplayValue = (item: unknown): string => {
@@ -175,10 +304,11 @@ const getDisplayValue = (value: unknown): string => {
     return `${getItemDisplayValue(nonEmptyItems[0])}, ${getItemDisplayValue(nonEmptyItems[1])} +${nonEmptyItems.length - 2}`
   }
 
+  // For non-array, non-object values, use original value for string conversion
   const stringValue = String(value)
   if (stringValue === '[object Object]') {
     try {
-      const json = JSON.stringify(value)
+      const json = JSON.stringify(parsedValue)
       if (json.length <= 40) return json
       return `${json.slice(0, 37)}...`
     } catch {
@@ -200,6 +330,7 @@ const SubBlockRow = ({
   rawValue,
   workspaceId,
   workflowId,
+  blockId,
   allSubBlockValues,
 }: {
   title: string
@@ -208,6 +339,7 @@ const SubBlockRow = ({
   rawValue?: unknown
   workspaceId?: string
   workflowId?: string
+  blockId?: string
   allSubBlockValues?: Record<string, { value: unknown }>
 }) => {
   const getStringValue = useCallback(
@@ -220,8 +352,9 @@ const SubBlockRow = ({
   )
 
   const dependencyValues = useMemo(() => {
-    if (!subBlock?.dependsOn?.length) return {}
-    return subBlock.dependsOn.reduce<Record<string, string>>((accumulator, dependency) => {
+    const fields = getDependsOnFields(subBlock?.dependsOn)
+    if (!fields.length) return {}
+    return fields.reduce<Record<string, string>>((accumulator, dependency) => {
       const dependencyValue = getStringValue(dependency)
       if (dependencyValue) {
         accumulator[dependency] = dependencyValue
@@ -230,9 +363,15 @@ const SubBlockRow = ({
     }, {})
   }, [getStringValue, subBlock?.dependsOn])
 
-  const { displayName: credentialName } = useCredentialDisplay(
-    subBlock?.type === 'oauth-input' && typeof rawValue === 'string' ? rawValue : undefined,
-    subBlock?.provider
+  const credentialSourceId =
+    subBlock?.type === 'oauth-input' && typeof rawValue === 'string' ? rawValue : undefined
+  const credentialProviderId = subBlock?.serviceId
+    ? getProviderIdFromServiceId(subBlock.serviceId)
+    : undefined
+  const { displayName: credentialName } = useCredentialName(
+    credentialSourceId,
+    credentialProviderId,
+    workflowId
   )
 
   const credentialId = dependencyValues.credential
@@ -253,21 +392,70 @@ const SubBlockRow = ({
     return typeof option === 'string' ? option : option.label
   }, [subBlock, rawValue])
 
-  const genericDisplayName = useDisplayName(subBlock, rawValue, {
-    workspaceId,
-    provider: subBlock?.provider,
+  const domainValue = getStringValue('domain')
+  const teamIdValue = getStringValue('teamId')
+  const projectIdValue = getStringValue('projectId')
+  const planIdValue = getStringValue('planId')
+
+  const { displayName: selectorDisplayName } = useSelectorDisplayName({
+    subBlock,
+    value: rawValue,
+    workflowId,
     credentialId: typeof credentialId === 'string' ? credentialId : undefined,
     knowledgeBaseId: typeof knowledgeBaseId === 'string' ? knowledgeBaseId : undefined,
-    domain: getStringValue('domain'),
-    teamId: getStringValue('teamId'),
-    projectId: getStringValue('projectId'),
-    planId: getStringValue('planId'),
+    domain: domainValue,
+    teamId: teamIdValue,
+    projectId: projectIdValue,
+    planId: planIdValue,
   })
 
-  // Subscribe to variables store to reactively update when variables change
+  const knowledgeBaseDisplayName = useKnowledgeBaseName(
+    subBlock?.type === 'knowledge-base-selector' && typeof rawValue === 'string'
+      ? rawValue
+      : undefined
+  )
+
+  const workflowMap = useWorkflowRegistry((state) => state.workflows)
+  const workflowSelectionName =
+    subBlock?.id === 'workflowId' && typeof rawValue === 'string'
+      ? (workflowMap[rawValue]?.name ?? null)
+      : null
+
+  const { data: mcpServers = [] } = useMcpServers(workspaceId || '')
+  const mcpServerDisplayName = useMemo(() => {
+    if (subBlock?.type !== 'mcp-server-selector' || typeof rawValue !== 'string') {
+      return null
+    }
+    const server = mcpServers.find((s) => s.id === rawValue)
+    return server?.name ?? null
+  }, [subBlock?.type, rawValue, mcpServers])
+
+  const { data: mcpToolsData = [] } = useMcpToolsQuery(workspaceId || '')
+  const mcpToolDisplayName = useMemo(() => {
+    if (subBlock?.type !== 'mcp-tool-selector' || typeof rawValue !== 'string') {
+      return null
+    }
+
+    const tool = mcpToolsData.find((t) => {
+      const toolId = createMcpToolId(t.serverId, t.name)
+      return toolId === rawValue
+    })
+    return tool?.name ?? null
+  }, [subBlock?.type, rawValue, mcpToolsData])
+
+  const webhookUrlDisplayValue = useMemo(() => {
+    if (subBlock?.id !== 'webhookUrlDisplay' || !blockId) {
+      return null
+    }
+    const baseUrl = getBaseUrl()
+    const triggerPath = allSubBlockValues?.triggerPath?.value as string | undefined
+    return triggerPath
+      ? `${baseUrl}/api/webhooks/trigger/${triggerPath}`
+      : `${baseUrl}/api/webhooks/trigger/${blockId}`
+  }, [subBlock?.id, blockId, allSubBlockValues])
+
   const allVariables = useVariablesStore((state) => state.variables)
 
-  // Special handling for variables-input to hydrate variable IDs to names from variables store
   const variablesDisplayValue = useMemo(() => {
     if (subBlock?.type !== 'variables-input' || !isVariableAssignmentsArray(rawValue)) {
       return null
@@ -279,7 +467,6 @@ const SubBlockRow = ({
 
     const names = rawValue
       .map((a) => {
-        // Prioritize ID lookup (source of truth) over stored name
         if (a.variableId) {
           const variable = workflowVariables.find((v: any) => v.id === a.variableId)
           return variable?.name
@@ -300,17 +487,28 @@ const SubBlockRow = ({
 
   const isSelectorType = subBlock?.type && SELECTOR_TYPES_HYDRATION_REQUIRED.includes(subBlock.type)
   const hydratedName =
-    credentialName || dropdownLabel || variablesDisplayValue || genericDisplayName
+    credentialName ||
+    dropdownLabel ||
+    variablesDisplayValue ||
+    knowledgeBaseDisplayName ||
+    workflowSelectionName ||
+    mcpServerDisplayName ||
+    mcpToolDisplayName ||
+    webhookUrlDisplayValue ||
+    selectorDisplayName
   const displayValue = maskedValue || hydratedName || (isSelectorType && value ? '-' : value)
 
   return (
     <div className='flex items-center gap-[8px]'>
-      <span className='min-w-0 truncate text-[14px] text-[var(--text-tertiary)]' title={title}>
+      <span
+        className='min-w-0 truncate text-[14px] text-[var(--text-tertiary)] capitalize'
+        title={title}
+      >
         {title}
       </span>
       {displayValue !== undefined && (
         <span
-          className='flex-1 truncate text-right text-[14px] text-[var(--white)]'
+          className='flex-1 truncate text-right text-[14px] text-[var(--text-primary)]'
           title={displayValue}
         >
           {displayValue}
@@ -336,14 +534,11 @@ export const WorkflowBlock = memo(function WorkflowBlock({
     currentWorkflow,
     activeWorkflowId,
     isEnabled,
-    isActive,
-    diffStatus,
-    isDeletedBlock,
-    isFocused,
     handleClick,
     hasRing,
     ringStyles,
-  } = useBlockCore({ blockId: id, data, isPending })
+    runPathStatus,
+  } = useBlockVisual({ blockId: id, data, isPending })
 
   const currentBlock = currentWorkflow.getBlockById(id)
 
@@ -356,13 +551,19 @@ export const WorkflowBlock = memo(function WorkflowBlock({
       currentWorkflow.blocks
     )
 
-  const { isWebhookConfigured, webhookProvider, webhookPath } = useWebhookInfo(id)
+  const {
+    isWebhookConfigured,
+    webhookProvider,
+    webhookPath,
+    isDisabled: isWebhookDisabled,
+    webhookId,
+    reactivateWebhook,
+  } = useWebhookInfo(id, currentWorkflowId)
 
   const {
     scheduleInfo,
     isLoading: isLoadingScheduleInfo,
     reactivateSchedule,
-    disableSchedule,
   } = useScheduleInfo(id, type, currentWorkflowId)
 
   const { childWorkflowId, childIsDeployed, childNeedsRedeploy, refetchDeployment } =
@@ -462,21 +663,16 @@ export const WorkflowBlock = memo(function WorkflowBlock({
      * Uses preview values in preview mode, diff workflow values in diff mode,
      * or the current block's subblock values otherwise.
      */
-    let stateToUse: Record<string, { value: unknown }> = {}
-
-    if (data.isPreview && data.subBlockValues) {
-      stateToUse = data.subBlockValues
-    } else if (currentWorkflow.isDiffMode && currentBlock) {
-      stateToUse = currentBlock.subBlocks || {}
-    } else {
-      stateToUse = Object.entries(blockSubBlockValues).reduce(
-        (acc, [key, value]) => {
-          acc[key] = { value }
-          return acc
-        },
-        {} as Record<string, { value: unknown }>
-      )
-    }
+    const stateToUse: Record<string, { value: unknown }> =
+      data.isPreview && data.subBlockValues
+        ? data.subBlockValues
+        : Object.entries(blockSubBlockValues).reduce(
+            (acc, [key, value]) => {
+              acc[key] = { value }
+              return acc
+            },
+            {} as Record<string, { value: unknown }>
+          )
 
     const effectiveAdvanced = displayAdvancedMode
     const effectiveTrigger = displayTriggerMode
@@ -590,15 +786,15 @@ export const WorkflowBlock = memo(function WorkflowBlock({
    */
   const getHandleClasses = (position: 'left' | 'right' | 'top' | 'bottom', isError = false) => {
     const baseClasses = '!z-[10] !cursor-crosshair !border-none !transition-[colors] !duration-150'
-    const colorClasses = isError ? '!bg-red-400 dark:!bg-red-500' : '!bg-[var(--surface-12)]'
+    const colorClasses = isError ? '!bg-[var(--text-error)]' : '!bg-[var(--workflow-edge)]'
 
     const positionClasses = {
-      left: '!left-[-7px] !h-5 !w-[7px] !rounded-l-[2px] !rounded-r-none hover:!left-[-10px] hover:!w-[10px] hover:!rounded-l-full',
+      left: '!left-[-8px] !h-5 !w-[7px] !rounded-l-[2px] !rounded-r-none hover:!left-[-11px] hover:!w-[10px] hover:!rounded-l-full',
       right:
-        '!right-[-7px] !h-5 !w-[7px] !rounded-r-[2px] !rounded-l-none hover:!right-[-10px] hover:!w-[10px] hover:!rounded-r-full',
-      top: '!top-[-7px] !h-[7px] !w-5 !rounded-t-[2px] !rounded-b-none hover:!top-[-10px] hover:!h-[10px] hover:!rounded-t-full',
+        '!right-[-8px] !h-5 !w-[7px] !rounded-r-[2px] !rounded-l-none hover:!right-[-11px] hover:!w-[10px] hover:!rounded-r-full',
+      top: '!top-[-8px] !h-[7px] !w-5 !rounded-t-[2px] !rounded-b-none hover:!top-[-11px] hover:!h-[10px] hover:!rounded-t-full',
       bottom:
-        '!bottom-[-7px] !h-[7px] !w-5 !rounded-b-[2px] !rounded-t-none hover:!bottom-[-10px] hover:!h-[10px] hover:!rounded-b-full',
+        '!bottom-[-8px] !h-[7px] !w-5 !rounded-b-[2px] !rounded-t-none hover:!bottom-[-11px] hover:!h-[10px] hover:!rounded-b-full',
     }
 
     return cn(baseClasses, colorClasses, positionClasses[position])
@@ -606,7 +802,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({
 
   const getHandleStyle = (position: 'horizontal' | 'vertical') => {
     if (position === 'horizontal') {
-      return { top: '20px', transform: 'translateY(-50%)' }
+      return { top: `${HANDLE_POSITIONS.DEFAULT_Y_OFFSET}px`, transform: 'translateY(-50%)' }
     }
     return { left: '50%', transform: 'translateX(-50%)' }
   }
@@ -657,7 +853,6 @@ export const WorkflowBlock = memo(function WorkflowBlock({
         config.category !== 'triggers' && type !== 'starter' && !displayTriggerMode
       const hasContentBelowHeader = subBlockRows.length > 0 || shouldShowDefaultHandles
 
-      // Count rows based on block type and whether default handles section is shown
       const defaultHandlesRow = shouldShowDefaultHandles ? 1 : 0
 
       let rowsCount = 0
@@ -711,7 +906,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({
         ref={contentRef}
         onClick={handleClick}
         className={cn(
-          'relative z-[20] w-[250px] cursor-default select-none rounded-[8px] bg-[var(--surface-2)]'
+          'relative z-[20] w-[250px] cursor-default select-none rounded-[8px] border border-[var(--border-1)] bg-[var(--surface-2)]'
         )}
       >
         {isPending && (
@@ -722,9 +917,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({
 
         <ActionBar blockId={id} blockType={type} disabled={!userPermissions.canEdit} />
 
-        {shouldShowDefaultHandles && (
-          <Connections blockId={id} horizontalHandles={horizontalHandles} />
-        )}
+        {shouldShowDefaultHandles && <Connections blockId={id} />}
 
         {shouldShowDefaultHandles && (
           <Handle
@@ -737,142 +930,99 @@ export const WorkflowBlock = memo(function WorkflowBlock({
             data-handleid='target'
             isConnectableStart={false}
             isConnectableEnd={true}
-            isValidConnection={(connection) => connection.source !== id}
+            isValidConnection={(connection) => {
+              if (connection.source === id) return false
+              const edges = useWorkflowStore.getState().edges
+              return !wouldCreateCycle(edges, connection.source!, connection.target!)
+            }}
           />
         )}
 
         <div
           className={cn(
             'workflow-drag-handle flex cursor-grab items-center justify-between p-[8px] [&:active]:cursor-grabbing',
-            hasContentBelowHeader && 'border-[var(--divider)] border-b'
+            hasContentBelowHeader && 'border-[var(--border-1)] border-b'
           )}
           onMouseDown={(e) => {
             e.stopPropagation()
           }}
         >
-          <div className='flex min-w-0 flex-1 items-center gap-[10px]'>
+          <div className='relative z-10 flex min-w-0 flex-1 items-center gap-[10px]'>
             <div
               className='flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center rounded-[6px]'
-              style={{ backgroundColor: isEnabled ? config.bgColor : 'gray' }}
+              style={{
+                background: isEnabled ? config.bgColor : 'gray',
+              }}
             >
               <config.icon className='h-[16px] w-[16px] text-white' />
             </div>
             <span
-              className={cn('truncate font-medium text-[16px]', !isEnabled && 'text-[#808080]')}
+              className={cn(
+                'truncate font-medium text-[16px]',
+                !isEnabled && runPathStatus !== 'success' && 'text-[var(--text-muted)]'
+              )}
               title={name}
             >
               {name}
             </span>
           </div>
-          <div className='flex flex-shrink-0 items-center gap-2'>
-            {isWorkflowSelector && childWorkflowId && (
-              <>
-                {typeof childIsDeployed === 'boolean' ? (
-                  <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                      <Badge
-                        variant='outline'
-                        className={!childIsDeployed || childNeedsRedeploy ? 'cursor-pointer' : ''}
-                        style={{
-                          borderColor: !childIsDeployed
-                            ? '#EF4444'
-                            : childNeedsRedeploy
-                              ? '#FF6600'
-                              : '#22C55E',
-                          color: !childIsDeployed
-                            ? '#EF4444'
-                            : childNeedsRedeploy
-                              ? '#FF6600'
-                              : '#22C55E',
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (
-                            (!childIsDeployed || childNeedsRedeploy) &&
-                            childWorkflowId &&
-                            !isDeploying
-                          ) {
-                            deployWorkflow(childWorkflowId)
-                          }
-                        }}
-                      >
-                        {isDeploying
-                          ? 'Deploying...'
-                          : !childIsDeployed
-                            ? 'undeployed'
-                            : childNeedsRedeploy
-                              ? 'redeploy'
-                              : 'deployed'}
-                      </Badge>
-                    </Tooltip.Trigger>
-                    {(!childIsDeployed || childNeedsRedeploy) && (
-                      <Tooltip.Content>
-                        <span className='text-sm'>
-                          {!childIsDeployed ? 'Click to deploy' : 'Click to redeploy'}
-                        </span>
-                      </Tooltip.Content>
-                    )}
-                  </Tooltip.Root>
-                ) : (
-                  <Badge variant='outline' style={{ visibility: 'hidden' }}>
-                    deployed
-                  </Badge>
-                )}
-              </>
-            )}
-            {!isEnabled && <Badge>disabled</Badge>}
+          <div className='relative z-10 flex flex-shrink-0 items-center gap-2'>
+            {isWorkflowSelector &&
+              childWorkflowId &&
+              typeof childIsDeployed === 'boolean' &&
+              (!childIsDeployed || childNeedsRedeploy) && (
+                <Tooltip.Root>
+                  <Tooltip.Trigger asChild>
+                    <Badge
+                      variant={!childIsDeployed ? 'red' : 'amber'}
+                      className='cursor-pointer'
+                      dot
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (childWorkflowId && !isDeploying) {
+                          deployWorkflow(childWorkflowId)
+                        }
+                      }}
+                    >
+                      {isDeploying ? 'Deploying...' : !childIsDeployed ? 'undeployed' : 'redeploy'}
+                    </Badge>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>
+                    <span className='text-sm'>
+                      {!childIsDeployed ? 'Click to deploy' : 'Click to redeploy'}
+                    </span>
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              )}
+            {!isEnabled && <Badge variant='gray-secondary'>disabled</Badge>}
 
-            {type === 'schedule' && (
-              <>
-                {shouldShowScheduleBadge ? (
-                  <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                      <Badge
-                        variant='outline'
-                        className={scheduleInfo?.isDisabled ? 'cursor-pointer' : ''}
-                        style={{
-                          borderColor: scheduleInfo?.isDisabled ? '#FF6600' : '#22C55E',
-                          color: scheduleInfo?.isDisabled ? '#FF6600' : '#22C55E',
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (scheduleInfo?.id) {
-                            if (scheduleInfo.isDisabled) {
-                              reactivateSchedule(scheduleInfo.id)
-                            } else {
-                              disableSchedule(scheduleInfo.id)
-                            }
-                          }
-                        }}
-                      >
-                        {scheduleInfo?.isDisabled ? 'disabled' : 'scheduled'}
-                      </Badge>
-                    </Tooltip.Trigger>
-                    {scheduleInfo?.isDisabled && (
-                      <Tooltip.Content>
-                        <span className='text-sm'>Click to reactivate</span>
-                      </Tooltip.Content>
-                    )}
-                  </Tooltip.Root>
-                ) : (
-                  <Badge variant='outline' style={{ visibility: 'hidden' }}>
-                    scheduled
+            {type === 'schedule' && shouldShowScheduleBadge && scheduleInfo?.isDisabled && (
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <Badge
+                    variant='amber'
+                    className='cursor-pointer'
+                    dot
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (scheduleInfo?.id) {
+                        reactivateSchedule(scheduleInfo.id)
+                      }
+                    }}
+                  >
+                    disabled
                   </Badge>
-                )}
-              </>
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  <span className='text-sm'>Click to reactivate</span>
+                </Tooltip.Content>
+              </Tooltip.Root>
             )}
 
             {showWebhookIndicator && (
               <Tooltip.Root>
                 <Tooltip.Trigger asChild>
-                  <Badge
-                    variant='outline'
-                    className='bg-[var(--brand-tertiary)] text-[var(--brand-tertiary)]'
-                  >
-                    <div className='relative flex items-center justify-center'>
-                      <div className='197, 94, 0.2)] absolute h-3 w-3 rounded-full bg-[rgba(34,' />
-                      <div className='relative h-2 w-2 rounded-full bg-[var(--brand-tertiary)]' />
-                    </div>
+                  <Badge variant='orange' dot>
                     Webhook
                   </Badge>
                 </Tooltip.Trigger>
@@ -890,6 +1040,35 @@ export const WorkflowBlock = memo(function WorkflowBlock({
                 </Tooltip.Content>
               </Tooltip.Root>
             )}
+
+            {isWebhookConfigured && isWebhookDisabled && webhookId && (
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <Badge
+                    variant='amber'
+                    className='cursor-pointer'
+                    dot
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      reactivateWebhook(webhookId)
+                    }}
+                  >
+                    disabled
+                  </Badge>
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  <span className='text-sm'>Click to reactivate</span>
+                </Tooltip.Content>
+              </Tooltip.Root>
+            )}
+            {/* {isActive && (
+              <div className='mr-[2px] ml-2 flex h-[16px] w-[16px] items-center justify-center'>
+                <div
+                  className='h-full w-full animate-spin-slow rounded-full border-[2.5px] border-[rgba(255,102,0,0.25)] border-t-[var(--warning)]'
+                  aria-hidden='true'
+                />
+              </div>
+            )} */}
           </div>
         </div>
 
@@ -915,6 +1094,7 @@ export const WorkflowBlock = memo(function WorkflowBlock({
                         rawValue={rawValue}
                         workspaceId={workspaceId}
                         workflowId={currentWorkflowId}
+                        blockId={id}
                         allSubBlockValues={subBlockState}
                       />
                     )
@@ -927,7 +1107,9 @@ export const WorkflowBlock = memo(function WorkflowBlock({
         {type === 'condition' && (
           <>
             {conditionRows.map((cond, condIndex) => {
-              const topOffset = 60 + condIndex * 29
+              const topOffset =
+                HANDLE_POSITIONS.CONDITION_START_Y +
+                condIndex * HANDLE_POSITIONS.CONDITION_ROW_HEIGHT
               return (
                 <Handle
                   key={`handle-${cond.id}`}
@@ -940,7 +1122,11 @@ export const WorkflowBlock = memo(function WorkflowBlock({
                   data-handleid={`condition-${cond.id}`}
                   isConnectableStart={true}
                   isConnectableEnd={false}
-                  isValidConnection={(connection) => connection.target !== id}
+                  isValidConnection={(connection) => {
+                    if (connection.target === id) return false
+                    const edges = useWorkflowStore.getState().edges
+                    return !wouldCreateCycle(edges, connection.source!, connection.target!)
+                  }}
                 />
               )
             })}
@@ -949,12 +1135,21 @@ export const WorkflowBlock = memo(function WorkflowBlock({
               position={Position.Right}
               id='error'
               className={getHandleClasses('right', true)}
-              style={{ right: '-7px', top: 'auto', bottom: '17px', transform: 'translateY(50%)' }}
+              style={{
+                right: '-7px',
+                top: 'auto',
+                bottom: `${HANDLE_POSITIONS.ERROR_BOTTOM_OFFSET}px`,
+                transform: 'translateY(50%)',
+              }}
               data-nodeid={id}
               data-handleid='error'
               isConnectableStart={true}
               isConnectableEnd={false}
-              isValidConnection={(connection) => connection.target !== id}
+              isValidConnection={(connection) => {
+                if (connection.target === id) return false
+                const edges = useWorkflowStore.getState().edges
+                return !wouldCreateCycle(edges, connection.source!, connection.target!)
+              }}
             />
           </>
         )}
@@ -971,7 +1166,11 @@ export const WorkflowBlock = memo(function WorkflowBlock({
               data-handleid='source'
               isConnectableStart={true}
               isConnectableEnd={false}
-              isValidConnection={(connection) => connection.target !== id}
+              isValidConnection={(connection) => {
+                if (connection.target === id) return false
+                const edges = useWorkflowStore.getState().edges
+                return !wouldCreateCycle(edges, connection.source!, connection.target!)
+              }}
             />
 
             {shouldShowDefaultHandles && (
@@ -980,12 +1179,21 @@ export const WorkflowBlock = memo(function WorkflowBlock({
                 position={Position.Right}
                 id='error'
                 className={getHandleClasses('right', true)}
-                style={{ right: '-7px', top: 'auto', bottom: '17px', transform: 'translateY(50%)' }}
+                style={{
+                  right: '-7px',
+                  top: 'auto',
+                  bottom: `${HANDLE_POSITIONS.ERROR_BOTTOM_OFFSET}px`,
+                  transform: 'translateY(50%)',
+                }}
                 data-nodeid={id}
                 data-handleid='error'
                 isConnectableStart={true}
                 isConnectableEnd={false}
-                isValidConnection={(connection) => connection.target !== id}
+                isValidConnection={(connection) => {
+                  if (connection.target === id) return false
+                  const edges = useWorkflowStore.getState().edges
+                  return !wouldCreateCycle(edges, connection.source!, connection.target!)
+                }}
               />
             )}
           </>

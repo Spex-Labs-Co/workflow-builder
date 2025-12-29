@@ -1,5 +1,6 @@
+import { createLogger } from '@sim/logger'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createLogger } from '@/lib/logs/console/logger'
+import { syncThemeToNextThemes } from '@/lib/core/utils/theme'
 import { useGeneralStore } from '@/stores/settings/general/store'
 
 const logger = createLogger('GeneralSettingsQuery')
@@ -17,14 +18,13 @@ export const generalSettingsKeys = {
  */
 export interface GeneralSettings {
   autoConnect: boolean
-  autoPan: boolean
-  consoleExpandedByDefault: boolean
-  showFloatingControls: boolean
   showTrainingControls: boolean
   superUserModeEnabled: boolean
   theme: 'light' | 'dark' | 'system'
   telemetryEnabled: boolean
   billingUsageNotificationsEnabled: boolean
+  errorNotificationsEnabled: boolean
+  snapToGridSize: number
 }
 
 /**
@@ -41,57 +41,62 @@ async function fetchGeneralSettings(): Promise<GeneralSettings> {
 
   return {
     autoConnect: data.autoConnect ?? true,
-    autoPan: data.autoPan ?? true,
-    consoleExpandedByDefault: data.consoleExpandedByDefault ?? true,
-    showFloatingControls: data.showFloatingControls ?? true,
     showTrainingControls: data.showTrainingControls ?? false,
     superUserModeEnabled: data.superUserModeEnabled ?? true,
     theme: data.theme || 'system',
     telemetryEnabled: data.telemetryEnabled ?? true,
     billingUsageNotificationsEnabled: data.billingUsageNotificationsEnabled ?? true,
+    errorNotificationsEnabled: data.errorNotificationsEnabled ?? true,
+    snapToGridSize: data.snapToGridSize ?? 0,
   }
 }
 
 /**
- * Sync React Query cache to Zustand store
- * This ensures the rest of the app (which uses Zustand) stays in sync
+ * Sync React Query cache to Zustand store and next-themes.
+ * This ensures the rest of the app (which uses Zustand) stays in sync.
+ * Uses shallow comparison to prevent unnecessary updates and flickering.
+ * @param settings - The general settings to sync
  */
 function syncSettingsToZustand(settings: GeneralSettings) {
   const store = useGeneralStore.getState()
 
-  // Update Zustand store to match React Query cache
-  // This allows the rest of the app to continue using Zustand for reading values
-  useGeneralStore.setState({
+  const newSettings = {
     isAutoConnectEnabled: settings.autoConnect,
-    isAutoPanEnabled: settings.autoPan,
-    isConsoleExpandedByDefault: settings.consoleExpandedByDefault,
-    showFloatingControls: settings.showFloatingControls,
     showTrainingControls: settings.showTrainingControls,
     superUserModeEnabled: settings.superUserModeEnabled,
     theme: settings.theme,
     telemetryEnabled: settings.telemetryEnabled,
     isBillingUsageNotificationsEnabled: settings.billingUsageNotificationsEnabled,
-  })
+    isErrorNotificationsEnabled: settings.errorNotificationsEnabled,
+    snapToGridSize: settings.snapToGridSize,
+  }
+
+  const hasChanges = Object.entries(newSettings).some(
+    ([key, value]) => store[key as keyof typeof newSettings] !== value
+  )
+
+  if (hasChanges) {
+    store.setSettings(newSettings)
+  }
+
+  syncThemeToNextThemes(settings.theme)
 }
 
 /**
- * Hook to fetch general settings
- * Also syncs to Zustand store to keep the rest of the app in sync
+ * Hook to fetch general settings.
+ * Syncs to Zustand store only on successful fetch (not on cache updates from mutations).
  */
 export function useGeneralSettings() {
-  const query = useQuery({
+  return useQuery({
     queryKey: generalSettingsKeys.settings(),
-    queryFn: fetchGeneralSettings,
-    staleTime: 60 * 60 * 1000, // 1 hour - settings rarely change
-    placeholderData: keepPreviousData, // Show cached data immediately while refetching
+    queryFn: async () => {
+      const settings = await fetchGeneralSettings()
+      syncSettingsToZustand(settings)
+      return settings
+    },
+    staleTime: 60 * 60 * 1000,
+    placeholderData: keepPreviousData,
   })
-
-  // Sync to Zustand whenever React Query cache updates
-  if (query.data) {
-    syncSettingsToZustand(query.data)
-  }
-
-  return query
 }
 
 /**
@@ -120,41 +125,30 @@ export function useUpdateGeneralSetting() {
       return response.json()
     },
     onMutate: async ({ key, value }) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: generalSettingsKeys.settings() })
 
-      // Snapshot the previous value
       const previousSettings = queryClient.getQueryData<GeneralSettings>(
         generalSettingsKeys.settings()
       )
 
-      // Optimistically update to the new value
       if (previousSettings) {
         const newSettings = {
           ...previousSettings,
           [key]: value,
         }
-        queryClient.setQueryData<GeneralSettings>(generalSettingsKeys.settings(), newSettings)
 
-        // Immediately sync to Zustand for optimistic update throughout the app
+        queryClient.setQueryData<GeneralSettings>(generalSettingsKeys.settings(), newSettings)
         syncSettingsToZustand(newSettings)
       }
 
       return { previousSettings }
     },
     onError: (err, _variables, context) => {
-      // Rollback on error
       if (context?.previousSettings) {
         queryClient.setQueryData(generalSettingsKeys.settings(), context.previousSettings)
-        // Also rollback Zustand store
         syncSettingsToZustand(context.previousSettings)
       }
       logger.error('Failed to update setting:', err)
-    },
-    onSuccess: (_data, _variables, _context) => {
-      // Invalidate to ensure we have the latest from server
-      queryClient.invalidateQueries({ queryKey: generalSettingsKeys.settings() })
-      // Sync will happen automatically when the query refetches in useGeneralSettings hook
     },
   })
 }

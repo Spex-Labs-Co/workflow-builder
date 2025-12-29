@@ -1,6 +1,9 @@
+import { memo, useMemo } from 'react'
 import { X } from 'lucide-react'
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps, getSmoothStepPath } from 'reactflow'
+import { useShallow } from 'zustand/react/shallow'
 import type { EdgeDiffStatus } from '@/lib/workflows/diff/types'
+import { useExecutionStore } from '@/stores/execution/store'
 import { useWorkflowDiffStore } from '@/stores/workflow-diff'
 
 interface WorkflowEdgeProps extends EdgeProps {
@@ -8,7 +11,7 @@ interface WorkflowEdgeProps extends EdgeProps {
   targetHandle?: string | null
 }
 
-export const WorkflowEdge = ({
+const WorkflowEdgeComponent = ({
   id,
   sourceX,
   sourceY,
@@ -40,58 +43,64 @@ export const WorkflowEdge = ({
   const isInsideLoop = data?.isInsideLoop ?? false
   const parentLoopId = data?.parentLoopId
 
-  const diffAnalysis = useWorkflowDiffStore((state) => state.diffAnalysis)
-  const isShowingDiff = useWorkflowDiffStore((state) => state.isShowingDiff)
-  const isDiffReady = useWorkflowDiffStore((state) => state.isDiffReady)
-
-  const generateEdgeIdentity = (
-    sourceId: string,
-    targetId: string,
-    sourceHandle?: string | null,
-    targetHandle?: string | null
-  ): string => {
-    const actualSourceHandle = sourceHandle || 'source'
-    const actualTargetHandle = targetHandle || 'target'
-    return `${sourceId}-${actualSourceHandle}-${targetId}-${actualTargetHandle}`
-  }
-
-  const edgeIdentifier = generateEdgeIdentity(source, target, sourceHandle, targetHandle)
-
-  let edgeDiffStatus: EdgeDiffStatus = null
-
-  if (data?.isDeleted) {
-    edgeDiffStatus = 'deleted'
-  } else if (diffAnalysis?.edge_diff && edgeIdentifier && isDiffReady) {
-    if (isShowingDiff) {
-      if (diffAnalysis.edge_diff.new_edges.includes(edgeIdentifier)) {
-        edgeDiffStatus = 'new'
-      } else if (diffAnalysis.edge_diff.unchanged_edges.includes(edgeIdentifier)) {
-        edgeDiffStatus = 'unchanged'
-      }
-    } else {
-      if (diffAnalysis.edge_diff.deleted_edges.includes(edgeIdentifier)) {
-        edgeDiffStatus = 'deleted'
-      }
-    }
-  }
+  // Combined store subscription to reduce subscription overhead
+  const { diffAnalysis, isShowingDiff, isDiffReady } = useWorkflowDiffStore(
+    useShallow((state) => ({
+      diffAnalysis: state.diffAnalysis,
+      isShowingDiff: state.isShowingDiff,
+      isDiffReady: state.isDiffReady,
+    }))
+  )
+  const lastRunEdges = useExecutionStore((state) => state.lastRunEdges)
 
   const dataSourceHandle = (data as { sourceHandle?: string } | undefined)?.sourceHandle
   const isErrorEdge = (sourceHandle ?? dataSourceHandle) === 'error'
+  const edgeRunStatus = lastRunEdges.get(id)
 
-  const getEdgeColor = () => {
-    if (edgeDiffStatus === 'deleted') return 'var(--text-error)'
-    if (isErrorEdge) return 'var(--text-error)'
-    if (edgeDiffStatus === 'new') return 'var(--brand-tertiary)'
-    return 'var(--surface-12)'
-  }
+  // Memoize diff status calculation to avoid recomputing on every render
+  const edgeDiffStatus = useMemo((): EdgeDiffStatus => {
+    if (data?.isDeleted) return 'deleted'
+    if (!diffAnalysis?.edge_diff || !isDiffReady) return null
 
-  const edgeStyle = {
-    ...(style ?? {}),
-    strokeWidth: edgeDiffStatus ? 3 : isSelected ? 2.5 : 2,
-    stroke: getEdgeColor(),
-    strokeDasharray: edgeDiffStatus === 'deleted' ? '10,5' : undefined,
-    opacity: edgeDiffStatus === 'deleted' ? 0.7 : isSelected ? 0.5 : 1,
-  }
+    const actualSourceHandle = sourceHandle || 'source'
+    const actualTargetHandle = targetHandle || 'target'
+    const edgeIdentifier = `${source}-${actualSourceHandle}-${target}-${actualTargetHandle}`
+
+    if (isShowingDiff) {
+      if (diffAnalysis.edge_diff.new_edges.includes(edgeIdentifier)) return 'new'
+      if (diffAnalysis.edge_diff.unchanged_edges.includes(edgeIdentifier)) return 'unchanged'
+    } else {
+      if (diffAnalysis.edge_diff.deleted_edges.includes(edgeIdentifier)) return 'deleted'
+    }
+    return null
+  }, [
+    data?.isDeleted,
+    diffAnalysis,
+    isDiffReady,
+    isShowingDiff,
+    source,
+    target,
+    sourceHandle,
+    targetHandle,
+  ])
+
+  // Memoize edge style to prevent object recreation
+  const edgeStyle = useMemo(() => {
+    let color = 'var(--workflow-edge)'
+    if (edgeDiffStatus === 'deleted') color = 'var(--text-error)'
+    else if (isErrorEdge) color = 'var(--text-error)'
+    else if (edgeDiffStatus === 'new') color = 'var(--brand-tertiary)'
+    else if (edgeRunStatus === 'success') color = 'var(--border-success)'
+    else if (edgeRunStatus === 'error') color = 'var(--text-error)'
+
+    return {
+      ...(style ?? {}),
+      strokeWidth: edgeDiffStatus ? 3 : isSelected ? 2.5 : 2,
+      stroke: color,
+      strokeDasharray: edgeDiffStatus === 'deleted' ? '10,5' : undefined,
+      opacity: edgeDiffStatus === 'deleted' ? 0.7 : isSelected ? 0.5 : 1,
+    }
+  }, [style, edgeDiffStatus, isSelected, isErrorEdge, edgeRunStatus])
 
   return (
     <>
@@ -133,10 +142,12 @@ export const WorkflowEdge = ({
               }
             }}
           >
-            <X className='h-4 w-4 text-[var(--text-error)] transition-colors group-hover:text-[var(--text-error)]/80 dark:text-[var(--text-error)] dark:group-hover:text-[var(--text-error)]/80' />
+            <X className='h-4 w-4 text-[var(--text-error)] transition-colors group-hover:text-[var(--text-error)]/80' />
           </div>
         </EdgeLabelRenderer>
       )}
     </>
   )
 }
+
+export const WorkflowEdge = memo(WorkflowEdgeComponent)

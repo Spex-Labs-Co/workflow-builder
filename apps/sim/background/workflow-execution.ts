@@ -1,15 +1,14 @@
-import { db } from '@sim/db'
-import { workflow as workflowTable } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { task } from '@trigger.dev/sdk'
-import { eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import { checkServerSideUsageLimits } from '@/lib/billing'
-import { createLogger } from '@/lib/logs/console/logger'
+import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
+import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
 import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
 import { PauseResumeManager } from '@/lib/workflows/executor/human-in-the-loop-manager'
 import { getWorkflowById } from '@/lib/workflows/utils'
 import { type ExecutionMetadata, ExecutionSnapshot } from '@/executor/execution/snapshot'
+import type { ExecutionResult } from '@/executor/types'
 
 const logger = createLogger('TriggerWorkflowExecution')
 
@@ -21,6 +20,11 @@ export type WorkflowExecutionPayload = {
   metadata?: Record<string, any>
 }
 
+/**
+ * Background workflow execution job
+ * @see preprocessExecution For detailed information on preprocessing checks
+ * @see executeWorkflowCore For the core workflow execution logic
+ */
 export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
   const workflowId = payload.workflowId
   const executionId = uuidv4()
@@ -36,62 +40,43 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
   const loggingSession = new LoggingSession(workflowId, executionId, triggerType, requestId)
 
   try {
-    const wfRows = await db
-      .select({ workspaceId: workflowTable.workspaceId })
-      .from(workflowTable)
-      .where(eq(workflowTable.id, workflowId))
-      .limit(1)
-    const workspaceId = wfRows[0]?.workspaceId || undefined
+    const preprocessResult = await preprocessExecution({
+      workflowId: payload.workflowId,
+      userId: payload.userId,
+      triggerType: triggerType,
+      executionId: executionId,
+      requestId: requestId,
+      checkRateLimit: true,
+      checkDeployment: true,
+      loggingSession: loggingSession,
+    })
 
-    const usageCheck = await checkServerSideUsageLimits(payload.userId)
-    if (usageCheck.isExceeded) {
-      logger.warn(
-        `[${requestId}] User ${payload.userId} has exceeded usage limits. Skipping workflow execution.`,
-        {
-          currentUsage: usageCheck.currentUsage,
-          limit: usageCheck.limit,
-          workflowId,
-        }
-      )
-
-      await loggingSession.safeStart({
-        userId: payload.userId,
-        workspaceId: workspaceId || '',
-        variables: {},
+    if (!preprocessResult.success) {
+      logger.error(`[${requestId}] Preprocessing failed: ${preprocessResult.error?.message}`, {
+        workflowId,
+        statusCode: preprocessResult.error?.statusCode,
       })
 
-      await loggingSession.safeCompleteWithError({
-        error: {
-          message:
-            usageCheck.message || 'Usage limit exceeded. Please upgrade your plan to continue.',
-          stackTrace: undefined,
-        },
-        traceSpans: [],
-      })
-
-      throw new Error(
-        usageCheck.message || 'Usage limit exceeded. Please upgrade your plan to continue.'
-      )
+      throw new Error(preprocessResult.error?.message || 'Preprocessing failed')
     }
+
+    const actorUserId = preprocessResult.actorUserId!
+    const workspaceId = preprocessResult.workflowRecord?.workspaceId
+    if (!workspaceId) {
+      throw new Error(`Workflow ${workflowId} has no associated workspace`)
+    }
+
+    logger.info(`[${requestId}] Preprocessing passed. Using actor: ${actorUserId}`)
+
+    await loggingSession.safeStart({
+      userId: actorUserId,
+      workspaceId,
+      variables: {},
+    })
 
     const workflow = await getWorkflowById(workflowId)
     if (!workflow) {
-      await loggingSession.safeStart({
-        userId: payload.userId,
-        workspaceId: workspaceId || '',
-        variables: {},
-      })
-
-      await loggingSession.safeCompleteWithError({
-        error: {
-          message:
-            'Workflow not found. The workflow may have been deleted or is no longer accessible.',
-          stackTrace: undefined,
-        },
-        traceSpans: [],
-      })
-
-      throw new Error(`Workflow ${workflowId} not found`)
+      throw new Error(`Workflow ${workflowId} not found after preprocessing`)
     }
 
     const metadata: ExecutionMetadata = {
@@ -99,17 +84,19 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       executionId,
       workflowId,
       workspaceId,
-      userId: payload.userId,
+      userId: actorUserId,
+      sessionUserId: undefined,
+      workflowUserId: workflow.userId,
       triggerType: payload.triggerType || 'api',
       useDraftState: false,
       startTime: new Date().toISOString(),
+      isClientSession: false,
     }
 
     const snapshot = new ExecutionSnapshot(
       metadata,
       workflow,
       payload.input,
-      {},
       workflow.variables || {},
       []
     )
@@ -152,11 +139,24 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       executedAt: new Date().toISOString(),
       metadata: payload.metadata,
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`[${requestId}] Workflow execution failed: ${workflowId}`, {
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       executionId,
     })
+
+    const errorWithResult = error as { executionResult?: ExecutionResult }
+    const executionResult = errorWithResult?.executionResult
+    const { traceSpans } = executionResult ? buildTraceSpans(executionResult) : { traceSpans: [] }
+
+    await loggingSession.safeCompleteWithError({
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      },
+      traceSpans,
+    })
+
     throw error
   }
 }

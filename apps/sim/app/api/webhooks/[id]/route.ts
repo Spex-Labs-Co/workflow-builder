@@ -1,11 +1,12 @@
 import { db } from '@sim/db'
 import { webhook, workflow } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getUserEntityPermissions } from '@/lib/permissions/utils'
-import { generateRequestId } from '@/lib/utils'
+import { validateInteger } from '@/lib/core/security/input-validation'
+import { generateRequestId } from '@/lib/core/utils/request'
+import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'
 
 const logger = createLogger('WebhookAPI')
 
@@ -95,7 +96,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const body = await request.json()
-    const { path, provider, providerConfig, isActive } = body
+    const { path, provider, providerConfig, isActive, failedCount } = body
+
+    if (failedCount !== undefined) {
+      const validation = validateInteger(failedCount, 'failedCount', { min: 0 })
+      if (!validation.isValid) {
+        logger.warn(`[${requestId}] ${validation.error}`)
+        return NextResponse.json({ error: validation.error }, { status: 400 })
+      }
+    }
 
     let resolvedProviderConfig = providerConfig
     if (providerConfig) {
@@ -172,6 +181,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       hasProviderUpdate: provider !== undefined,
       hasConfigUpdate: providerConfig !== undefined,
       hasActiveUpdate: isActive !== undefined,
+      hasFailedCountUpdate: failedCount !== undefined,
     })
 
     // Update the webhook
@@ -185,6 +195,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             ? resolvedProviderConfig
             : webhooks[0].webhook.providerConfig,
         isActive: isActive !== undefined ? isActive : webhooks[0].webhook.isActive,
+        failedCount: failedCount !== undefined ? failedCount : webhooks[0].webhook.failedCount,
         updatedAt: new Date(),
       })
       .where(eq(webhook.id, id))
@@ -266,7 +277,7 @@ export async function DELETE(
 
     const foundWebhook = webhookData.webhook
 
-    const { cleanupExternalWebhook } = await import('@/lib/webhooks/webhook-helpers')
+    const { cleanupExternalWebhook } = await import('@/lib/webhooks/provider-subscriptions')
     await cleanupExternalWebhook(foundWebhook, webhookData.workflow, requestId)
 
     await db.delete(webhook).where(eq(webhook.id, id))

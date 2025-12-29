@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('drizzle-orm')
-vi.mock('@/lib/logs/console/logger', () => ({
+vi.mock('@sim/logger', () => ({
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     debug: vi.fn(),
@@ -30,7 +30,7 @@ vi.stubGlobal(
   })
 )
 
-vi.mock('@/lib/env', () => ({
+vi.mock('@/lib/core/config/env', () => ({
   env: {},
   getEnv: (key: string) => process.env[key],
   isTruthy: (value: string | boolean | number | undefined) =>
@@ -42,7 +42,7 @@ import {
   handleTagAndVectorSearch,
   handleTagOnlySearch,
   handleVectorOnlySearch,
-} from './utils'
+} from '@/app/api/knowledge/search/utils'
 
 describe('Knowledge Search Utils', () => {
   beforeEach(() => {
@@ -54,7 +54,7 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: {},
+        structuredFilters: [],
       }
 
       await expect(handleTagOnlySearch(params)).rejects.toThrow(
@@ -66,14 +66,14 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: { tag1: 'api' },
+        structuredFilters: [{ tagSlot: 'tag1', fieldType: 'text', operator: 'eq', value: 'api' }],
       }
 
       // This test validates the function accepts the right parameters
       // The actual database interaction is tested via route tests
       expect(params.knowledgeBaseIds).toEqual(['kb-123'])
       expect(params.topK).toBe(10)
-      expect(params.filters).toEqual({ tag1: 'api' })
+      expect(params.structuredFilters).toHaveLength(1)
     })
   })
 
@@ -123,7 +123,7 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: {},
+        structuredFilters: [],
         queryVector: JSON.stringify([0.1, 0.2, 0.3]),
         distanceThreshold: 0.8,
       }
@@ -137,7 +137,7 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: { tag1: 'api' },
+        structuredFilters: [{ tagSlot: 'tag1', fieldType: 'text', operator: 'eq', value: 'api' }],
         distanceThreshold: 0.8,
       }
 
@@ -150,7 +150,7 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: { tag1: 'api' },
+        structuredFilters: [{ tagSlot: 'tag1', fieldType: 'text', operator: 'eq', value: 'api' }],
         queryVector: JSON.stringify([0.1, 0.2, 0.3]),
       }
 
@@ -163,7 +163,7 @@ describe('Knowledge Search Utils', () => {
       const params = {
         knowledgeBaseIds: ['kb-123'],
         topK: 10,
-        filters: { tag1: 'api' },
+        structuredFilters: [{ tagSlot: 'tag1', fieldType: 'text', operator: 'eq', value: 'api' }],
         queryVector: JSON.stringify([0.1, 0.2, 0.3]),
         distanceThreshold: 0.8,
       }
@@ -171,7 +171,7 @@ describe('Knowledge Search Utils', () => {
       // This test validates the function accepts the right parameters
       expect(params.knowledgeBaseIds).toEqual(['kb-123'])
       expect(params.topK).toBe(10)
-      expect(params.filters).toEqual({ tag1: 'api' })
+      expect(params.structuredFilters).toHaveLength(1)
       expect(params.queryVector).toBe(JSON.stringify([0.1, 0.2, 0.3]))
       expect(params.distanceThreshold).toBe(0.8)
     })
@@ -179,7 +179,7 @@ describe('Knowledge Search Utils', () => {
 
   describe('generateSearchEmbedding', () => {
     it('should use Azure OpenAI when KB-specific config is provided', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         AZURE_OPENAI_API_KEY: 'test-azure-key',
@@ -214,7 +214,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should fallback to OpenAI when no KB Azure config provided', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         OPENAI_API_KEY: 'test-openai-key',
@@ -245,7 +245,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should use default API version when not provided in Azure config', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         AZURE_OPENAI_API_KEY: 'test-azure-key',
@@ -274,7 +274,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should use custom model name when provided in Azure config', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         AZURE_OPENAI_API_KEY: 'test-azure-key',
@@ -304,7 +304,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should throw error when no API configuration provided', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
 
       await expect(generateSearchEmbedding('test query')).rejects.toThrow(
@@ -313,7 +313,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should handle Azure OpenAI API errors properly', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         AZURE_OPENAI_API_KEY: 'test-azure-key',
@@ -337,7 +337,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should handle OpenAI API errors properly', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         OPENAI_API_KEY: 'test-openai-key',
@@ -358,7 +358,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should include correct request body for Azure OpenAI', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         AZURE_OPENAI_API_KEY: 'test-azure-key',
@@ -392,7 +392,7 @@ describe('Knowledge Search Utils', () => {
     })
 
     it('should include correct request body for OpenAI', async () => {
-      const { env } = await import('@/lib/env')
+      const { env } = await import('@/lib/core/config/env')
       Object.keys(env).forEach((key) => delete (env as any)[key])
       Object.assign(env, {
         OPENAI_API_KEY: 'test-openai-key',

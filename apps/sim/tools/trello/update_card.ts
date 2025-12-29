@@ -1,4 +1,4 @@
-import { env } from '@/lib/env'
+import { env } from '@/lib/core/config/env'
 import type { TrelloUpdateCardParams, TrelloUpdateCardResponse } from '@/tools/trello/types'
 import type { ToolConfig } from '@/tools/types'
 
@@ -118,11 +118,9 @@ export const trelloUpdateCardTool: ToolConfig<TrelloUpdateCardParams, TrelloUpda
   },
 
   outputs: {
-    success: { type: 'boolean', description: 'Whether the card was updated successfully' },
     card: {
       type: 'object',
       description: 'The updated card object with id, name, desc, url, and other properties',
     },
-    error: { type: 'string', description: 'Error message if operation failed' },
   },
 }

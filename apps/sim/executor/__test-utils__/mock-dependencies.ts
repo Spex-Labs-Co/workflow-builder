@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 // Mock common dependencies used across executor handler tests
 
 // Logger
-vi.mock('@/lib/logs/console/logger', () => ({
+vi.mock('@sim/logger', () => ({
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     error: vi.fn(),
@@ -31,8 +31,11 @@ vi.mock('@/tools/utils', () => ({
 }))
 
 // Utils
-vi.mock('@/lib/utils', () => ({
-  isHosted: vi.fn().mockReturnValue(false),
+vi.mock('@/lib/core/config/environment', () => ({
+  isHosted: false,
+}))
+
+vi.mock('@/lib/core/config/api-keys', () => ({
   getRotatingApiKey: vi.fn(),
 }))
 

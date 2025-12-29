@@ -1,0 +1,191 @@
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { getStartDateFromTimeRange } from '@/lib/logs/filters'
+import { parseQuery, queryToApiParams } from '@/lib/logs/query-parser'
+import type { LogsResponse, TimeRange, WorkflowLog } from '@/stores/logs/filters/types'
+
+export const logKeys = {
+  all: ['logs'] as const,
+  lists: () => [...logKeys.all, 'list'] as const,
+  list: (workspaceId: string | undefined, filters: Omit<LogFilters, 'page'>) =>
+    [...logKeys.lists(), workspaceId ?? '', filters] as const,
+  details: () => [...logKeys.all, 'detail'] as const,
+  detail: (logId: string | undefined) => [...logKeys.details(), logId ?? ''] as const,
+  dashboard: (workspaceId: string | undefined, filters: Record<string, unknown>) =>
+    [...logKeys.all, 'dashboard', workspaceId ?? '', filters] as const,
+}
+
+interface LogFilters {
+  timeRange: TimeRange
+  level: string
+  workflowIds: string[]
+  folderIds: string[]
+  triggers: string[]
+  searchQuery: string
+  limit: number
+}
+
+/**
+ * Applies common filter parameters to a URLSearchParams object.
+ * Shared between paginated and non-paginated log fetches.
+ */
+function applyFilterParams(params: URLSearchParams, filters: Omit<LogFilters, 'limit'>): void {
+  if (filters.level !== 'all') {
+    params.set('level', filters.level)
+  }
+
+  if (filters.triggers.length > 0) {
+    params.set('triggers', filters.triggers.join(','))
+  }
+
+  if (filters.workflowIds.length > 0) {
+    params.set('workflowIds', filters.workflowIds.join(','))
+  }
+
+  if (filters.folderIds.length > 0) {
+    params.set('folderIds', filters.folderIds.join(','))
+  }
+
+  const startDate = getStartDateFromTimeRange(filters.timeRange)
+  if (startDate) {
+    params.set('startDate', startDate.toISOString())
+  }
+
+  if (filters.searchQuery.trim()) {
+    const parsedQuery = parseQuery(filters.searchQuery.trim())
+    const searchParams = queryToApiParams(parsedQuery)
+
+    for (const [key, value] of Object.entries(searchParams)) {
+      params.set(key, value)
+    }
+  }
+}
+
+function buildQueryParams(workspaceId: string, filters: LogFilters, page: number): string {
+  const params = new URLSearchParams()
+
+  params.set('workspaceId', workspaceId)
+  params.set('limit', filters.limit.toString())
+  params.set('offset', ((page - 1) * filters.limit).toString())
+
+  applyFilterParams(params, filters)
+
+  return params.toString()
+}
+
+async function fetchLogsPage(
+  workspaceId: string,
+  filters: LogFilters,
+  page: number
+): Promise<{ logs: WorkflowLog[]; hasMore: boolean; nextPage: number | undefined }> {
+  const queryParams = buildQueryParams(workspaceId, filters, page)
+  const response = await fetch(`/api/logs?${queryParams}`)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch logs')
+  }
+
+  const apiData: LogsResponse = await response.json()
+  const hasMore = apiData.data.length === filters.limit && apiData.page < apiData.totalPages
+
+  return {
+    logs: apiData.data || [],
+    hasMore,
+    nextPage: hasMore ? page + 1 : undefined,
+  }
+}
+
+async function fetchLogDetail(logId: string): Promise<WorkflowLog> {
+  const response = await fetch(`/api/logs/${logId}`)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch log details')
+  }
+
+  const { data } = await response.json()
+  return data
+}
+
+interface UseLogsListOptions {
+  enabled?: boolean
+  refetchInterval?: number | false
+}
+
+export function useLogsList(
+  workspaceId: string | undefined,
+  filters: LogFilters,
+  options?: UseLogsListOptions
+) {
+  return useInfiniteQuery({
+    queryKey: logKeys.list(workspaceId, filters),
+    queryFn: ({ pageParam }) => fetchLogsPage(workspaceId as string, filters, pageParam),
+    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval ?? false,
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+  })
+}
+
+export function useLogDetail(logId: string | undefined) {
+  return useQuery({
+    queryKey: logKeys.detail(logId),
+    queryFn: () => fetchLogDetail(logId as string),
+    enabled: Boolean(logId),
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+const DASHBOARD_LOGS_LIMIT = 10000
+
+/**
+ * Fetches all logs for dashboard metrics (non-paginated).
+ * Uses same filters as the logs list but with a high limit to get all data.
+ */
+async function fetchAllLogs(
+  workspaceId: string,
+  filters: Omit<LogFilters, 'limit'>
+): Promise<WorkflowLog[]> {
+  const params = new URLSearchParams()
+
+  params.set('workspaceId', workspaceId)
+  params.set('limit', DASHBOARD_LOGS_LIMIT.toString())
+  params.set('offset', '0')
+
+  applyFilterParams(params, filters)
+
+  const response = await fetch(`/api/logs?${params.toString()}`)
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch logs for dashboard')
+  }
+
+  const apiData: LogsResponse = await response.json()
+  return apiData.data || []
+}
+
+interface UseDashboardLogsOptions {
+  enabled?: boolean
+  refetchInterval?: number | false
+}
+
+/**
+ * Hook for fetching all logs for dashboard metrics.
+ * Unlike useLogsList, this fetches all logs in a single request
+ * to ensure dashboard metrics are computed from complete data.
+ */
+export function useDashboardLogs(
+  workspaceId: string | undefined,
+  filters: Omit<LogFilters, 'limit'>,
+  options?: UseDashboardLogsOptions
+) {
+  return useQuery({
+    queryKey: logKeys.dashboard(workspaceId, filters),
+    queryFn: () => fetchAllLogs(workspaceId as string, filters),
+    enabled: Boolean(workspaceId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval ?? false,
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+  })
+}

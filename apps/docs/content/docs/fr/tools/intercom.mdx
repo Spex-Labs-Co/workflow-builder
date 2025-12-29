@@ -1,0 +1,361 @@
+---
+title: Intercom
+description: Gérez les contacts, les entreprises, les conversations, les tickets
+  et les messages dans Intercom
+---
+
+import { BlockInfoCard } from "@/components/ui/block-info-card"
+
+<BlockInfoCard 
+  type="intercom"
+  color="#E0E0E0"
+/>
+
+{/* MANUAL-CONTENT-START:intro */}
+[Intercom](https://www.intercom.com/) est une plateforme de communication client de premier plan qui vous permet de gérer et d'automatiser vos interactions avec les contacts, les entreprises, les conversations, les tickets et les messages, le tout en un seul endroit. L'intégration d'Intercom dans Sim permet à vos agents de gérer par programmation les relations clients, les demandes d'assistance et les conversations directement à partir de vos flux de travail automatisés.
+
+Avec les outils Intercom, vous pouvez :
+
+- **Gestion des contacts :** créer, obtenir, mettre à jour, lister, rechercher et supprimer des contacts — automatisez vos processus de CRM et gardez vos dossiers clients à jour.
+- **Gestion des entreprises :** créer de nouvelles entreprises, récupérer les détails d'une entreprise et lister toutes les entreprises liées à vos utilisateurs ou clients professionnels.
+- **Gestion des conversations :** obtenir, lister, répondre et rechercher dans les conversations — permettant aux agents de suivre les fils de support en cours, de fournir des réponses et d'automatiser les actions de suivi.
+- **Gestion des tickets :** créer et récupérer des tickets par programmation, vous aidant à automatiser le service client, le suivi des problèmes d'assistance et les escalades de flux de travail.
+- **Envoi de messages :** déclencher des messages aux utilisateurs ou prospects pour l'intégration, le support ou le marketing, le tout depuis votre automatisation de flux de travail.
+
+En intégrant les outils Intercom dans Sim, vous permettez à vos flux de travail de communiquer directement avec vos utilisateurs, d'automatiser les processus d'assistance client, de gérer les prospects et de rationaliser les communications à grande échelle. Que vous ayez besoin de créer de nouveaux contacts, de synchroniser les données clients, de gérer les tickets d'assistance ou d'envoyer des messages d'engagement personnalisés, les outils Intercom offrent un moyen complet de gérer les interactions client dans le cadre de vos automatisations intelligentes.
+{/* MANUAL-CONTENT-END */}
+
+## Instructions d'utilisation
+
+Intégrez Intercom dans le flux de travail. Peut créer, obtenir, mettre à jour, lister, rechercher et supprimer des contacts ; créer, obtenir et lister des entreprises ; obtenir, lister, répondre et rechercher des conversations ; créer et obtenir des tickets ; et créer des messages.
+
+## Outils
+
+### `intercom_create_contact`
+
+Créer un nouveau contact dans Intercom avec email, external_id ou role
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ------------ | ----------- |
+| `role` | string | Non | Le rôle du contact. Accepte « user » ou « lead ». Par défaut « lead » si non spécifié. |
+| `email` | string | Non | L'adresse e-mail du contact |
+| `external_id` | string | Non | Un identifiant unique pour le contact fourni par le client |
+| `phone` | string | Non | Le numéro de téléphone du contact |
+| `name` | string | Non | Le nom du contact |
+| `avatar` | string | Non | Une URL d'image d'avatar pour le contact |
+| `signed_up_at` | number | Non | L'heure d'inscription de l'utilisateur sous forme d'horodatage Unix |
+| `last_seen_at` | number | Non | L'heure de dernière activité de l'utilisateur sous forme d'horodatage Unix |
+| `owner_id` | string | Non | L'identifiant d'un administrateur auquel la propriété du compte du contact a été attribuée |
+| `unsubscribed_from_emails` | boolean | Non | Indique si le contact s'est désabonné des e-mails |
+| `custom_attributes` | string | Non | Attributs personnalisés sous forme d'objet JSON (par ex., \{"nom_attribut": "valeur"\}) |
+| `company_id` | string | Non | Identifiant de l'entreprise à associer au contact lors de la création |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `contact` | object | Objet contact créé |
+
+### `intercom_get_contact`
+
+Obtenir un seul contact par ID depuis Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `contactId` | string | Oui | ID du contact à récupérer |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `contact` | object | Objet contact |
+
+### `intercom_update_contact`
+
+Mettre à jour un contact existant dans Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ------------ | ----------- |
+| `contactId` | string | Oui | Identifiant du contact à mettre à jour |
+| `role` | string | Non | Le rôle du contact. Accepte « user » ou « lead ». |
+| `external_id` | string | Non | Un identifiant unique pour le contact fourni par le client |
+| `email` | string | Non | L'adresse e-mail du contact |
+| `phone` | string | Non | Le numéro de téléphone du contact |
+| `name` | string | Non | Le nom du contact |
+| `avatar` | string | Non | Une URL d'image d'avatar pour le contact |
+| `signed_up_at` | number | Non | L'heure d'inscription de l'utilisateur sous forme d'horodatage Unix |
+| `last_seen_at` | number | Non | L'heure de dernière activité de l'utilisateur sous forme d'horodatage Unix |
+| `owner_id` | string | Non | L'identifiant d'un administrateur auquel la propriété du compte du contact a été attribuée |
+| `unsubscribed_from_emails` | boolean | Non | Indique si le contact s'est désabonné des e-mails |
+| `custom_attributes` | string | Non | Attributs personnalisés sous forme d'objet JSON (par ex., \{"nom_attribut": "valeur"\}) |
+| `company_id` | string | Non | Identifiant de l'entreprise à associer au contact |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `contact` | object | Objet contact mis à jour |
+
+### `intercom_list_contacts`
+
+Lister tous les contacts d'Intercom avec prise en charge de la pagination
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `per_page` | nombre | Non | Nombre de résultats par page \(max : 150\) |
+| `starting_after` | chaîne | Non | Curseur pour la pagination - ID pour commencer après |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `contacts` | array | Tableau d'objets contact |
+
+### `intercom_search_contacts`
+
+Rechercher des contacts dans Intercom à l'aide d'une requête
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `query` | string | Oui | Requête de recherche \(par ex., \{"field":"email","operator":"=","value":"user@example.com"\}\) |
+| `per_page` | number | Non | Nombre de résultats par page \(max : 150\) |
+| `starting_after` | string | Non | Curseur pour la pagination |
+| `sort_field` | string | Non | Champ de tri \(par ex., "name", "created_at", "last_seen_at"\) |
+| `sort_order` | string | Non | Ordre de tri : "ascending" ou "descending" |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `contacts` | array | Tableau d'objets contact correspondants |
+
+### `intercom_delete_contact`
+
+Supprimer un contact d'Intercom par ID
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `contactId` | chaîne | Oui | ID du contact à supprimer |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `id` | string | ID du contact supprimé |
+| `deleted` | boolean | Indique si le contact a été supprimé |
+| `metadata` | object | Métadonnées de l'opération |
+
+### `intercom_create_company`
+
+Créer ou mettre à jour une entreprise dans Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `company_id` | string | Oui | Votre identifiant unique pour l'entreprise |
+| `name` | string | Non | Le nom de l'entreprise |
+| `website` | string | Non | Le site web de l'entreprise |
+| `plan` | string | Non | Le nom du plan de l'entreprise |
+| `size` | number | Non | Le nombre d'employés dans l'entreprise |
+| `industry` | string | Non | Le secteur d'activité de l'entreprise |
+| `monthly_spend` | number | Non | Le chiffre d'affaires que l'entreprise génère pour votre activité. Remarque : ce champ tronque les nombres décimaux en entiers \(par ex., 155,98 devient 155\) |
+| `custom_attributes` | string | Non | Attributs personnalisés sous forme d'objet JSON |
+| `remote_created_at` | number | Non | La date de création de l'entreprise par vous sous forme d'horodatage Unix |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `company` | object | Objet entreprise créé ou mis à jour |
+
+### `intercom_get_company`
+
+Récupérer une seule entreprise par ID depuis Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ---------- | ----------- |
+| `companyId` | chaîne | Oui | ID de l'entreprise à récupérer |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `company` | object | Objet entreprise |
+
+### `intercom_list_companies`
+
+Liste toutes les entreprises d'Intercom avec prise en charge de la pagination. Remarque : cet endpoint a une limite de 10 000 entreprises qui peuvent être renvoyées en utilisant la pagination. Pour les ensembles de données de plus de 10 000 entreprises, utilisez plutôt l'API Scroll.
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `per_page` | number | Non | Nombre de résultats par page |
+| `page` | number | Non | Numéro de page |
+| `starting_after` | string | Non | Curseur pour la pagination \(préféré à la pagination par page\) |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `companies` | array | Tableau d'objets entreprise |
+
+### `intercom_get_conversation`
+
+Récupérer une seule conversation par ID depuis Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `conversationId` | string | Oui | ID de la conversation à récupérer |
+| `display_as` | string | Non | Définir sur "plaintext" pour récupérer les messages en texte brut |
+| `include_translations` | boolean | Non | Lorsque true, les parties de la conversation seront traduites dans la langue détectée de la conversation |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `conversation` | object | Objet conversation |
+
+### `intercom_list_conversations`
+
+Lister toutes les conversations depuis Intercom avec prise en charge de la pagination
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `per_page` | number | Non | Nombre de résultats par page \(max : 150\) |
+| `starting_after` | string | Non | Curseur pour la pagination |
+| `sort` | string | Non | Champ de tri \(ex., "waiting_since", "updated_at", "created_at"\) |
+| `order` | string | Non | Ordre de tri : "asc" \(croissant\) ou "desc" \(décroissant\) |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `conversations` | array | Tableau d'objets conversation |
+
+### `intercom_reply_conversation`
+
+Répondre à une conversation en tant qu'administrateur dans Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `conversationId` | string | Oui | ID de la conversation à laquelle répondre |
+| `message_type` | string | Oui | Type de message : "comment" ou "note" |
+| `body` | string | Oui | Corps du texte de la réponse |
+| `admin_id` | string | Non | ID de l'administrateur qui rédige la réponse. Si non fourni, un administrateur par défaut \(Operator/Fin\) sera utilisé. |
+| `attachment_urls` | string | Non | Liste d'URL d'images séparées par des virgules \(max 10\) |
+| `created_at` | number | Non | Horodatage Unix du moment où la réponse a été créée. Si non fourni, l'heure actuelle est utilisée. |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `conversation` | object | Objet conversation mis à jour |
+
+### `intercom_search_conversations`
+
+Rechercher des conversations dans Intercom à l'aide d'une requête
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `query` | string | Oui | Requête de recherche sous forme d'objet JSON |
+| `per_page` | number | Non | Nombre de résultats par page \(max : 150\) |
+| `starting_after` | string | Non | Curseur pour la pagination |
+| `sort_field` | string | Non | Champ de tri \(par exemple, "created_at", "updated_at"\) |
+| `sort_order` | string | Non | Ordre de tri : "ascending" ou "descending" |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `conversations` | array | Tableau d'objets conversation correspondants |
+
+### `intercom_create_ticket`
+
+Créer un nouveau ticket dans Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `ticket_type_id` | string | Oui | L'ID du type de ticket |
+| `contacts` | string | Oui | Tableau JSON d'identifiants de contacts \(par exemple, \[\{"id": "contact_id"\}\]\) |
+| `ticket_attributes` | string | Oui | Objet JSON avec les attributs du ticket incluant _default_title_ et _default_description_ |
+| `company_id` | string | Non | ID de l'entreprise à associer au ticket |
+| `created_at` | number | Non | Horodatage Unix du moment où le ticket a été créé. Si non fourni, l'heure actuelle est utilisée. |
+| `conversation_to_link_id` | string | Non | ID d'une conversation existante à lier à ce ticket |
+| `disable_notifications` | boolean | Non | Lorsque défini sur true, supprime les notifications lors de la création du ticket |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `ticket` | object | Objet ticket créé |
+
+### `intercom_get_ticket`
+
+Récupérer un ticket unique par ID depuis Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | -------- | ----------- |
+| `ticketId` | string | Oui | ID du ticket à récupérer |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `ticket` | object | Objet ticket |
+
+### `intercom_create_message`
+
+Créer et envoyer un nouveau message initié par l'administrateur dans Intercom
+
+#### Entrée
+
+| Paramètre | Type | Obligatoire | Description |
+| --------- | ---- | ----------- | ----------- |
+| `message_type` | string | Oui | Type de message : "inapp" pour les messages in-app ou "email" pour les messages e-mail |
+| `template` | string | Oui | Style du modèle de message : "plain" pour texte brut ou "personal" pour style personnalisé |
+| `subject` | string | Non | Le sujet du message \(pour le type e-mail\) |
+| `body` | string | Oui | Le corps du message |
+| `from_type` | string | Oui | Type d'expéditeur : "admin" |
+| `from_id` | string | Oui | L'ID de l'administrateur qui envoie le message |
+| `to_type` | string | Oui | Type de destinataire : "contact" |
+| `to_id` | string | Oui | L'ID du contact qui reçoit le message |
+| `created_at` | number | Non | Horodatage Unix du moment où le message a été créé. Si non fourni, l'heure actuelle est utilisée. |
+
+#### Sortie
+
+| Paramètre | Type | Description |
+| --------- | ---- | ----------- |
+| `message` | object | Objet message créé |
+
+## Notes
+
+- Catégorie : `tools`
+- Type : `intercom`

@@ -1,32 +1,35 @@
 import { db, workflow, workflowSchedule } from '@sim/db'
+import { createLogger } from '@sim/logger'
 import { task } from '@trigger.dev/sdk'
 import { Cron } from 'croner'
 import { eq } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import type { ZodRecord, ZodString } from 'zod'
-import { checkServerSideUsageLimits } from '@/lib/billing'
-import { getHighestPrioritySubscription } from '@/lib/billing/core/subscription'
+import { decryptSecret } from '@/lib/core/security/encryption'
 import { getPersonalAndWorkspaceEnv } from '@/lib/environment/utils'
-import { createLogger } from '@/lib/logs/console/logger'
+import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
+import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
+import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
+import { PauseResumeManager } from '@/lib/workflows/executor/human-in-the-loop-manager'
+import {
+  blockExistsInDeployment,
+  loadDeployedWorkflowState,
+} from '@/lib/workflows/persistence/utils'
 import {
   type BlockState,
   calculateNextRunTime as calculateNextTime,
   getScheduleTimeValues,
   getSubBlockValue,
-} from '@/lib/schedules/utils'
-import { decryptSecret } from '@/lib/utils'
-import { blockExistsInDeployment, loadDeployedWorkflowState } from '@/lib/workflows/db-helpers'
-import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
-import { PauseResumeManager } from '@/lib/workflows/executor/human-in-the-loop-manager'
-import { getWorkspaceBilledAccountUserId } from '@/lib/workspaces/utils'
+} from '@/lib/workflows/schedules/utils'
+import { REFERENCE } from '@/executor/constants'
 import { type ExecutionMetadata, ExecutionSnapshot } from '@/executor/execution/snapshot'
-import { RateLimiter } from '@/services/queue'
+import type { ExecutionResult } from '@/executor/types'
+import { createEnvVarPattern } from '@/executor/utils/reference-validation'
 import { mergeSubblockState } from '@/stores/workflows/server-utils'
+import { MAX_CONSECUTIVE_FAILURES } from '@/triggers/constants'
 
 const logger = createLogger('TriggerScheduleExecution')
-
-const MAX_CONSECUTIVE_FAILURES = 3
 
 type WorkflowRecord = typeof workflow.$inferSelect
 type WorkflowScheduleUpdate = Partial<typeof workflowSchedule.$inferInsert>
@@ -74,145 +77,6 @@ async function releaseScheduleLock(
   await applyScheduleUpdate(scheduleId, updates, requestId, context)
 }
 
-async function resolveActorUserId(workflowRecord: WorkflowRecord) {
-  if (workflowRecord.workspaceId) {
-    const actor = await getWorkspaceBilledAccountUserId(workflowRecord.workspaceId)
-    if (actor) {
-      return actor
-    }
-  }
-
-  return workflowRecord.userId ?? null
-}
-
-async function handleWorkflowNotFound(
-  payload: ScheduleExecutionPayload,
-  executionId: string,
-  requestId: string,
-  now: Date
-) {
-  const loggingSession = new LoggingSession(payload.workflowId, executionId, 'schedule', requestId)
-
-  await loggingSession.safeStart({
-    userId: 'unknown',
-    workspaceId: '',
-    variables: {},
-  })
-
-  await loggingSession.safeCompleteWithError({
-    error: {
-      message:
-        'Workflow not found. The scheduled workflow may have been deleted or is no longer accessible.',
-      stackTrace: undefined,
-    },
-    traceSpans: [],
-  })
-
-  await applyScheduleUpdate(
-    payload.scheduleId,
-    {
-      updatedAt: now,
-      lastQueuedAt: null,
-      status: 'disabled',
-    },
-    requestId,
-    `Failed to disable schedule ${payload.scheduleId} after missing workflow`,
-    `Disabled schedule ${payload.scheduleId} because the workflow no longer exists`
-  )
-}
-
-async function handleMissingActor(
-  payload: ScheduleExecutionPayload,
-  workflowRecord: WorkflowRecord,
-  executionId: string,
-  requestId: string,
-  now: Date
-) {
-  const loggingSession = new LoggingSession(payload.workflowId, executionId, 'schedule', requestId)
-
-  await loggingSession.safeStart({
-    userId: workflowRecord.userId ?? 'unknown',
-    workspaceId: workflowRecord.workspaceId || '',
-    variables: {},
-  })
-
-  await loggingSession.safeCompleteWithError({
-    error: {
-      message:
-        'Unable to resolve billing account. This workflow cannot execute scheduled runs without a valid billing account.',
-      stackTrace: undefined,
-    },
-    traceSpans: [],
-  })
-
-  await releaseScheduleLock(
-    payload.scheduleId,
-    requestId,
-    now,
-    `Failed to release schedule ${payload.scheduleId} after billing account lookup`
-  )
-}
-
-async function ensureRateLimit(
-  actorUserId: string,
-  userSubscription: Awaited<ReturnType<typeof getHighestPrioritySubscription>>,
-  rateLimiter: RateLimiter,
-  loggingSession: LoggingSession,
-  payload: ScheduleExecutionPayload,
-  workflowRecord: WorkflowRecord,
-  requestId: string,
-  now: Date
-) {
-  const rateLimitCheck = await rateLimiter.checkRateLimitWithSubscription(
-    actorUserId,
-    userSubscription,
-    'schedule',
-    false
-  )
-
-  if (rateLimitCheck.allowed) {
-    return true
-  }
-
-  logger.warn(`[${requestId}] Rate limit exceeded for scheduled workflow ${payload.workflowId}`, {
-    userId: workflowRecord.userId,
-    remaining: rateLimitCheck.remaining,
-    resetAt: rateLimitCheck.resetAt,
-  })
-
-  await loggingSession.safeStart({
-    userId: actorUserId,
-    workspaceId: workflowRecord.workspaceId || '',
-    variables: {},
-  })
-
-  await loggingSession.safeCompleteWithError({
-    error: {
-      message: `Rate limit exceeded. ${rateLimitCheck.remaining || 0} requests remaining. Resets at ${
-        rateLimitCheck.resetAt ? new Date(rateLimitCheck.resetAt).toISOString() : 'unknown'
-      }. Schedule will retry in 5 minutes.`,
-      stackTrace: undefined,
-    },
-    traceSpans: [],
-  })
-
-  const retryDelay = 5 * 60 * 1000
-  const nextRetryAt = new Date(now.getTime() + retryDelay)
-
-  await applyScheduleUpdate(
-    payload.scheduleId,
-    {
-      updatedAt: now,
-      nextRunAt: nextRetryAt,
-    },
-    requestId,
-    `Error updating schedule ${payload.scheduleId} for rate limit`,
-    `Updated next retry time for schedule ${payload.scheduleId} due to rate limit`
-  )
-
-  return false
-}
-
 async function calculateNextRunFromDeployment(
   payload: ScheduleExecutionPayload,
   requestId: string
@@ -227,61 +91,6 @@ async function calculateNextRunFromDeployment(
     )
     return null
   }
-}
-
-async function ensureUsageLimits(
-  actorUserId: string,
-  payload: ScheduleExecutionPayload,
-  workflowRecord: WorkflowRecord,
-  loggingSession: LoggingSession,
-  requestId: string,
-  now: Date
-) {
-  const usageCheck = await checkServerSideUsageLimits(actorUserId)
-  if (!usageCheck.isExceeded) {
-    return true
-  }
-
-  logger.warn(
-    `[${requestId}] User ${workflowRecord.userId} has exceeded usage limits. Skipping scheduled execution.`,
-    {
-      currentUsage: usageCheck.currentUsage,
-      limit: usageCheck.limit,
-      workflowId: payload.workflowId,
-    }
-  )
-
-  await loggingSession.safeStart({
-    userId: actorUserId,
-    workspaceId: workflowRecord.workspaceId || '',
-    variables: {},
-  })
-
-  await loggingSession.safeCompleteWithError({
-    error: {
-      message:
-        usageCheck.message ||
-        'Usage limit exceeded. Please upgrade your plan to continue using scheduled workflows.',
-      stackTrace: undefined,
-    },
-    traceSpans: [],
-  })
-
-  const nextRunAt = await calculateNextRunFromDeployment(payload, requestId)
-  if (nextRunAt) {
-    await applyScheduleUpdate(
-      payload.scheduleId,
-      {
-        updatedAt: now,
-        nextRunAt,
-      },
-      requestId,
-      `Error updating schedule ${payload.scheduleId} after usage limit check`,
-      `Scheduled next run for ${payload.scheduleId} after usage limit`
-    )
-  }
-
-  return false
 }
 
 async function determineNextRunAfterError(
@@ -320,17 +129,25 @@ async function ensureBlockVariablesResolvable(
       await Promise.all(
         Object.values(subBlocks).map(async (subBlock) => {
           const value = subBlock.value
-          if (typeof value !== 'string' || !value.includes('{{') || !value.includes('}}')) {
+          if (
+            typeof value !== 'string' ||
+            !value.includes(REFERENCE.ENV_VAR_START) ||
+            !value.includes(REFERENCE.ENV_VAR_END)
+          ) {
             return
           }
 
-          const matches = value.match(/{{([^}]+)}}/g)
+          const envVarPattern = createEnvVarPattern()
+          const matches = value.match(envVarPattern)
           if (!matches) {
             return
           }
 
           for (const match of matches) {
-            const varName = match.slice(2, -2)
+            const varName = match.slice(
+              REFERENCE.ENV_VAR_START.length,
+              -REFERENCE.ENV_VAR_END.length
+            )
             const encryptedValue = variables[varName]
             if (!encryptedValue) {
               throw new Error(`Environment variable "${varName}" was not found`)
@@ -385,9 +202,7 @@ async function runWorkflowExecution({
     const deployedData = await loadDeployedWorkflowState(payload.workflowId)
 
     const blocks = deployedData.blocks
-    const edges = deployedData.edges
-    const loops = deployedData.loops
-    const parallels = deployedData.parallels
+    const { deploymentVersionId } = deployedData
     logger.info(`[${requestId}] Loaded deployed workflow ${payload.workflowId}`)
 
     if (payload.blockId) {
@@ -403,9 +218,16 @@ async function runWorkflowExecution({
 
     const mergedStates = mergeSubblockState(blocks)
 
+    const workspaceId = workflowRecord.workspaceId
+    if (!workspaceId) {
+      throw new Error(`Workflow ${payload.workflowId} has no associated workspace`)
+    }
+
+    const personalEnvUserId = workflowRecord.userId
+
     const { personalEncrypted, workspaceEncrypted } = await getPersonalAndWorkspaceEnv(
-      actorUserId,
-      workflowRecord.workspaceId || undefined
+      personalEnvUserId,
+      workspaceId
     )
 
     const variables = EnvVarsSchema.parse({
@@ -424,27 +246,30 @@ async function runWorkflowExecution({
 
     await loggingSession.safeStart({
       userId: actorUserId,
-      workspaceId: workflowRecord.workspaceId || '',
+      workspaceId,
       variables: variables || {},
+      deploymentVersionId,
     })
 
     const metadata: ExecutionMetadata = {
       requestId,
       executionId,
       workflowId: payload.workflowId,
-      workspaceId: workflowRecord.workspaceId || '',
+      workspaceId,
       userId: actorUserId,
+      sessionUserId: undefined,
+      workflowUserId: workflowRecord.userId,
       triggerType: 'schedule',
       triggerBlockId: payload.blockId || undefined,
       useDraftState: false,
       startTime: new Date().toISOString(),
+      isClientSession: false,
     }
 
     const snapshot = new ExecutionSnapshot(
       metadata,
       workflowRecord,
       input,
-      {},
       workflowRecord.variables || {},
       []
     )
@@ -483,27 +308,22 @@ async function runWorkflowExecution({
     }
 
     return { status: 'failure', blocks, executionResult }
-  } catch (earlyError) {
-    logger.error(
-      `[${requestId}] Early failure in scheduled workflow ${payload.workflowId}`,
-      earlyError
-    )
+  } catch (error: unknown) {
+    logger.error(`[${requestId}] Early failure in scheduled workflow ${payload.workflowId}`, error)
 
-    try {
-      await loggingSession.safeCompleteWithError({
-        error: {
-          message: `Schedule execution failed: ${
-            earlyError instanceof Error ? earlyError.message : String(earlyError)
-          }`,
-          stackTrace: earlyError instanceof Error ? earlyError.stack : undefined,
-        },
-        traceSpans: [],
-      })
-    } catch (loggingError) {
-      logger.error(`[${requestId}] Failed to complete log entry for schedule failure`, loggingError)
-    }
+    const errorWithResult = error as { executionResult?: ExecutionResult }
+    const executionResult = errorWithResult?.executionResult
+    const { traceSpans } = executionResult ? buildTraceSpans(executionResult) : { traceSpans: [] }
 
-    throw earlyError
+    await loggingSession.safeCompleteWithError({
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        stackTrace: error instanceof Error ? error.stack : undefined,
+      },
+      traceSpans,
+    })
+
+    throw error
   }
 }
 
@@ -560,29 +380,6 @@ export async function executeScheduleJob(payload: ScheduleExecutionPayload) {
   const EnvVarsSchema = zod.z.record(zod.z.string())
 
   try {
-    const [workflowRecord] = await db
-      .select()
-      .from(workflow)
-      .where(eq(workflow.id, payload.workflowId))
-      .limit(1)
-
-    if (!workflowRecord) {
-      logger.warn(`[${requestId}] Workflow ${payload.workflowId} not found`)
-      await handleWorkflowNotFound(payload, executionId, requestId, now)
-      return
-    }
-
-    const actorUserId = await resolveActorUserId(workflowRecord)
-    if (!actorUserId) {
-      logger.warn(
-        `[${requestId}] Skipping schedule ${payload.scheduleId}: unable to resolve billed account.`
-      )
-      await handleMissingActor(payload, workflowRecord, executionId, requestId, now)
-      return
-    }
-
-    const userSubscription = await getHighestPrioritySubscription(actorUserId)
-
     const loggingSession = new LoggingSession(
       payload.workflowId,
       executionId,
@@ -590,31 +387,144 @@ export async function executeScheduleJob(payload: ScheduleExecutionPayload) {
       requestId
     )
 
-    const rateLimiter = new RateLimiter()
-    const withinRateLimit = await ensureRateLimit(
-      actorUserId,
-      userSubscription,
-      rateLimiter,
-      loggingSession,
-      payload,
-      workflowRecord,
+    const preprocessResult = await preprocessExecution({
+      workflowId: payload.workflowId,
+      userId: 'unknown', // Will be resolved from workflow record
+      triggerType: 'schedule',
+      executionId,
       requestId,
-      now
-    )
+      checkRateLimit: true,
+      checkDeployment: true,
+      loggingSession,
+    })
 
-    if (!withinRateLimit) {
-      return
+    if (!preprocessResult.success) {
+      const statusCode = preprocessResult.error?.statusCode || 500
+
+      switch (statusCode) {
+        case 401: {
+          logger.warn(
+            `[${requestId}] Authentication error during preprocessing, disabling schedule`
+          )
+          await applyScheduleUpdate(
+            payload.scheduleId,
+            {
+              updatedAt: now,
+              lastQueuedAt: null,
+              lastFailedAt: now,
+              status: 'disabled',
+            },
+            requestId,
+            `Failed to disable schedule ${payload.scheduleId} after authentication error`,
+            `Disabled schedule ${payload.scheduleId} due to authentication failure (401)`
+          )
+          return
+        }
+
+        case 403: {
+          logger.warn(
+            `[${requestId}] Authorization error during preprocessing, disabling schedule: ${preprocessResult.error?.message}`
+          )
+          await applyScheduleUpdate(
+            payload.scheduleId,
+            {
+              updatedAt: now,
+              lastQueuedAt: null,
+              lastFailedAt: now,
+              status: 'disabled',
+            },
+            requestId,
+            `Failed to disable schedule ${payload.scheduleId} after authorization error`,
+            `Disabled schedule ${payload.scheduleId} due to authorization failure (403)`
+          )
+          return
+        }
+
+        case 404: {
+          logger.warn(`[${requestId}] Workflow not found, disabling schedule`)
+          await applyScheduleUpdate(
+            payload.scheduleId,
+            {
+              updatedAt: now,
+              lastQueuedAt: null,
+              status: 'disabled',
+            },
+            requestId,
+            `Failed to disable schedule ${payload.scheduleId} after missing workflow`,
+            `Disabled schedule ${payload.scheduleId} because the workflow no longer exists`
+          )
+          return
+        }
+
+        case 429: {
+          logger.warn(`[${requestId}] Rate limit exceeded, scheduling retry`)
+          const retryDelay = 5 * 60 * 1000
+          const nextRetryAt = new Date(now.getTime() + retryDelay)
+
+          await applyScheduleUpdate(
+            payload.scheduleId,
+            {
+              updatedAt: now,
+              nextRunAt: nextRetryAt,
+            },
+            requestId,
+            `Error updating schedule ${payload.scheduleId} for rate limit`,
+            `Updated next retry time for schedule ${payload.scheduleId} due to rate limit`
+          )
+          return
+        }
+
+        case 402: {
+          logger.warn(`[${requestId}] Usage limit exceeded, scheduling next run`)
+          const nextRunAt = await calculateNextRunFromDeployment(payload, requestId)
+          if (nextRunAt) {
+            await applyScheduleUpdate(
+              payload.scheduleId,
+              {
+                updatedAt: now,
+                nextRunAt,
+              },
+              requestId,
+              `Error updating schedule ${payload.scheduleId} after usage limit check`,
+              `Scheduled next run for ${payload.scheduleId} after usage limit`
+            )
+          }
+          return
+        }
+
+        default: {
+          logger.error(`[${requestId}] Preprocessing failed: ${preprocessResult.error?.message}`)
+          const nextRunAt = await determineNextRunAfterError(payload, now, requestId)
+          const newFailedCount = (payload.failedCount || 0) + 1
+          const shouldDisable = newFailedCount >= MAX_CONSECUTIVE_FAILURES
+
+          if (shouldDisable) {
+            logger.warn(
+              `[${requestId}] Disabling schedule for workflow ${payload.workflowId} after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`
+            )
+          }
+
+          await applyScheduleUpdate(
+            payload.scheduleId,
+            {
+              updatedAt: now,
+              nextRunAt,
+              failedCount: newFailedCount,
+              lastFailedAt: now,
+              status: shouldDisable ? 'disabled' : 'active',
+            },
+            requestId,
+            `Error updating schedule ${payload.scheduleId} after preprocessing failure`,
+            `Updated schedule ${payload.scheduleId} after preprocessing failure`
+          )
+          return
+        }
+      }
     }
 
-    const withinUsageLimits = await ensureUsageLimits(
-      actorUserId,
-      payload,
-      workflowRecord,
-      loggingSession,
-      requestId,
-      now
-    )
-    if (!withinUsageLimits) {
+    const { actorUserId, workflowRecord } = preprocessResult
+    if (!actorUserId || !workflowRecord) {
+      logger.error(`[${requestId}] Missing required preprocessing data`)
       return
     }
 
@@ -654,6 +564,7 @@ export async function executeScheduleJob(payload: ScheduleExecutionPayload) {
             updatedAt: now,
             nextRunAt,
             failedCount: 0,
+            lastQueuedAt: null,
           },
           requestId,
           `Error updating schedule ${payload.scheduleId} after success`,
@@ -687,8 +598,10 @@ export async function executeScheduleJob(payload: ScheduleExecutionPayload) {
         `Error updating schedule ${payload.scheduleId} after failure`,
         `Updated schedule ${payload.scheduleId} after failure`
       )
-    } catch (error: any) {
-      if (error?.message?.includes('Service overloaded')) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+
+      if (errorMessage.includes('Service overloaded')) {
         logger.warn(`[${requestId}] Service overloaded, retrying schedule in 5 minutes`)
 
         const retryDelay = 5 * 60 * 1000
@@ -733,7 +646,7 @@ export async function executeScheduleJob(payload: ScheduleExecutionPayload) {
         `Updated schedule ${payload.scheduleId} after execution error`
       )
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`[${requestId}] Error processing schedule ${payload.scheduleId}`, error)
   }
 }

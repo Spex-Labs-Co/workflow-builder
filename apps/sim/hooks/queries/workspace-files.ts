@@ -1,5 +1,5 @@
+import { createLogger } from '@sim/logger'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createLogger } from '@/lib/logs/console/logger'
 import type { WorkspaceFileRecord } from '@/lib/uploads/contexts/workspace'
 
 const logger = createLogger('WorkspaceFilesQuery')
@@ -49,7 +49,7 @@ export function useWorkspaceFiles(workspaceId: string) {
     queryFn: () => fetchWorkspaceFiles(workspaceId),
     enabled: !!workspaceId,
     staleTime: 30 * 1000, // 30 seconds - files can change frequently
-    placeholderData: keepPreviousData, // Show cached data immediately (no skeleton loading!)
+    placeholderData: keepPreviousData, // Show cached data immediately
   })
 }
 
@@ -59,7 +59,6 @@ export function useWorkspaceFiles(workspaceId: string) {
 async function fetchStorageInfo(): Promise<StorageInfo | null> {
   const response = await fetch('/api/users/me/usage-limits')
 
-  // Treat 404 as "no storage info available"
   if (response.status === 404) {
     return null
   }
@@ -164,17 +163,14 @@ export function useDeleteWorkspaceFile() {
       return data
     },
     onMutate: async ({ workspaceId, fileId, fileSize }) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: workspaceFilesKeys.list(workspaceId) })
       await queryClient.cancelQueries({ queryKey: ['storageInfo'] })
 
-      // Snapshot the previous values
       const previousFiles = queryClient.getQueryData<WorkspaceFileRecord[]>(
         workspaceFilesKeys.list(workspaceId)
       )
       const previousStorage = queryClient.getQueryData<StorageInfo>(['storageInfo'])
 
-      // Optimistically update files list
       if (previousFiles) {
         queryClient.setQueryData<WorkspaceFileRecord[]>(
           workspaceFilesKeys.list(workspaceId),
@@ -182,7 +178,6 @@ export function useDeleteWorkspaceFile() {
         )
       }
 
-      // Optimistically update storage info
       if (previousStorage) {
         const newUsedBytes = Math.max(0, previousStorage.usedBytes - fileSize)
         const newPercentUsed = (newUsedBytes / previousStorage.limitBytes) * 100
@@ -196,7 +191,6 @@ export function useDeleteWorkspaceFile() {
       return { previousFiles, previousStorage }
     },
     onError: (_err, variables, context) => {
-      // Rollback on error
       if (context?.previousFiles) {
         queryClient.setQueryData(
           workspaceFilesKeys.list(variables.workspaceId),
@@ -209,7 +203,6 @@ export function useDeleteWorkspaceFile() {
       logger.error('Failed to delete file')
     },
     onSettled: (_data, _error, variables) => {
-      // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: workspaceFilesKeys.list(variables.workspaceId) })
       queryClient.invalidateQueries({ queryKey: ['storageInfo'] })
     },

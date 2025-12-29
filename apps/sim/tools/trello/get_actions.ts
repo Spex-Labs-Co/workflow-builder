@@ -1,4 +1,4 @@
-import { env } from '@/lib/env'
+import { env } from '@/lib/core/config/env'
 import type { TrelloGetActionsParams, TrelloGetActionsResponse } from '@/tools/trello/types'
 import type { ToolConfig } from '@/tools/types'
 
@@ -102,12 +102,10 @@ export const trelloGetActionsTool: ToolConfig<TrelloGetActionsParams, TrelloGetA
   },
 
   outputs: {
-    success: { type: 'boolean', description: 'Whether the operation was successful' },
     actions: {
       type: 'array',
       description: 'Array of action objects with type, date, member, and data',
     },
     count: { type: 'number', description: 'Number of actions returned' },
-    error: { type: 'string', description: 'Error message if operation failed' },
   },
 }

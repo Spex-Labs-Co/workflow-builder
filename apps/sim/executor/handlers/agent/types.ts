@@ -2,14 +2,26 @@ export interface AgentInputs {
   model?: string
   responseFormat?: string | object
   tools?: ToolInput[]
+  // Legacy inputs (backward compatible)
   systemPrompt?: string
   userPrompt?: string | object
-  memories?: any
+  memories?: any // Legacy memory block output
+  // New message array input (from messages-input subblock)
+  messages?: Message[]
+  // Memory configuration
+  memoryType?: 'none' | 'conversation' | 'sliding_window' | 'sliding_window_tokens'
+  conversationId?: string // Required for all non-none memory types
+  slidingWindowSize?: string // For message-based sliding window
+  slidingWindowTokens?: string // For token-based sliding window
+  // LLM parameters
   temperature?: number
   maxTokens?: number
   apiKey?: string
   azureEndpoint?: string
   azureApiVersion?: string
+  vertexProject?: string
+  vertexLocation?: string
+  vertexCredential?: string
   reasoningEffort?: string
   verbosity?: string
 }
@@ -23,11 +35,14 @@ export interface ToolInput {
   timeout?: number
   usageControl?: 'auto' | 'force' | 'none'
   operation?: string
+  /** Database ID for custom tools (new reference format) */
+  customToolId?: string
 }
 
 export interface Message {
   role: 'system' | 'user' | 'assistant'
   content: string
+  executionId?: string
   function_call?: any
   tool_calls?: any[]
 }

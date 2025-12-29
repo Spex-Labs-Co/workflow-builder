@@ -1,4 +1,4 @@
-import { createLogger } from '@/lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
 import { getStorageConfig, USE_BLOB_STORAGE, USE_S3_STORAGE } from '@/lib/uploads/config'
 import type { BlobConfig } from '@/lib/uploads/providers/blob/types'
 import type { S3Config } from '@/lib/uploads/providers/s3/types'
@@ -444,7 +444,7 @@ export async function generatePresignedDownloadUrl(
     return getPresignedUrlWithConfig(key, createBlobConfig(config), expirationSeconds)
   }
 
-  const { getBaseUrl } = await import('@/lib/urls/utils')
+  const { getBaseUrl } = await import('@/lib/core/utils/urls')
   const baseUrl = getBaseUrl()
   return `${baseUrl}/api/files/serve/${encodeURIComponent(key)}`
 }

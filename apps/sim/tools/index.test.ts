@@ -6,38 +6,69 @@
  * This file contains unit tests for the tools registry and executeTool function,
  * which are the central pieces of infrastructure for executing tools.
  */
+
+import {
+  createExecutionContext,
+  createMockFetch,
+  type ExecutionContext,
+  type MockFetchResponse,
+} from '@sim/testing'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExecutionContext } from '@/executor/types'
-import { mockEnvironmentVariables } from '@/tools/__test-utils__/test-tools'
 import { executeTool } from '@/tools/index'
 import { tools } from '@/tools/registry'
 import { getTool } from '@/tools/utils'
 
-// Helper function to create mock ExecutionContext
-const createMockExecutionContext = (overrides?: Partial<ExecutionContext>): ExecutionContext => ({
-  workflowId: 'test-workflow',
-  workspaceId: 'workspace-456',
-  blockStates: new Map(),
-  blockLogs: [],
-  metadata: { duration: 0 },
-  environmentVariables: {},
-  decisions: { router: new Map(), condition: new Map() },
-  loopExecutions: new Map(),
-  completedLoops: new Set(),
-  executedBlocks: new Set(),
-  activeExecutionPath: new Set(),
-  ...overrides,
-})
+/**
+ * Sets up global fetch mock with Next.js preconnect support.
+ */
+function setupFetchMock(config: MockFetchResponse = {}) {
+  const mockFetch = createMockFetch(config)
+  const fetchWithPreconnect = Object.assign(mockFetch, { preconnect: vi.fn() }) as typeof fetch
+  global.fetch = fetchWithPreconnect
+  return mockFetch
+}
+
+/**
+ * Creates a mock execution context with workspaceId for tool tests.
+ */
+function createToolExecutionContext(overrides?: Partial<ExecutionContext>): ExecutionContext {
+  const ctx = createExecutionContext({
+    workflowId: overrides?.workflowId ?? 'test-workflow',
+    blockStates: overrides?.blockStates,
+    executedBlocks: overrides?.executedBlocks,
+    blockLogs: overrides?.blockLogs,
+    metadata: overrides?.metadata,
+    environmentVariables: overrides?.environmentVariables,
+  })
+  return {
+    ...ctx,
+    workspaceId: 'workspace-456',
+    ...overrides,
+  } as ExecutionContext
+}
+
+/**
+ * Sets up environment variables and returns a cleanup function.
+ */
+function setupEnvVars(variables: Record<string, string>) {
+  const originalEnv = { ...process.env }
+  Object.assign(process.env, variables)
+
+  return () => {
+    Object.keys(variables).forEach((key) => delete process.env[key])
+    Object.entries(originalEnv).forEach(([key, value]) => {
+      if (value !== undefined) process.env[key] = value
+    })
+  }
+}
 
 describe('Tools Registry', () => {
   it('should include all expected built-in tools', () => {
     expect(Object.keys(tools).length).toBeGreaterThan(10)
 
-    // Check for existence of some core tools
     expect(tools.http_request).toBeDefined()
     expect(tools.function_execute).toBeDefined()
 
-    // Check for some integrations
     expect(tools.gmail_read).toBeDefined()
     expect(tools.gmail_send).toBeDefined()
     expect(tools.google_drive_list).toBeDefined()
@@ -64,7 +95,6 @@ describe('Tools Registry', () => {
 
 describe('Custom Tools', () => {
   beforeEach(() => {
-    // Mock custom tools store
     vi.mock('@/stores/custom-tools/store', () => ({
       useCustomToolsStore: {
         getState: () => ({
@@ -115,7 +145,6 @@ describe('Custom Tools', () => {
       },
     }))
 
-    // Mock environment store
     vi.mock('@/stores/settings/environment/store', () => ({
       useEnvironmentStore: {
         getState: () => ({
@@ -151,40 +180,14 @@ describe('executeTool Function', () => {
   let cleanupEnvVars: () => void
 
   beforeEach(() => {
-    // Mock fetch
-    global.fetch = Object.assign(
-      vi.fn().mockImplementation(async (url, options) => {
-        const mockResponse = {
-          ok: true,
-          status: 200,
-          json: () =>
-            Promise.resolve({
-              success: true,
-              output: { result: 'Direct request successful' },
-            }),
-          headers: {
-            get: () => 'application/json',
-            forEach: () => {},
-          },
-          clone: function () {
-            return { ...this }
-          },
-        }
-
-        if (url.toString().includes('/api/proxy')) {
-          return mockResponse
-        }
-
-        return mockResponse
-      }),
-      { preconnect: vi.fn() }
-    ) as typeof fetch
-
-    // Set environment variables
-    process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
-    cleanupEnvVars = mockEnvironmentVariables({
-      NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
+    setupFetchMock({
+      json: { success: true, output: { result: 'Direct request successful' } },
+      status: 200,
+      headers: { 'content-type': 'application/json' },
     })
+
+    process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
+    cleanupEnvVars = setupEnvVars({ NEXT_PUBLIC_APP_URL: 'http://localhost:3000' })
   })
 
   afterEach(() => {
@@ -200,7 +203,7 @@ describe('executeTool Function', () => {
         method: 'GET',
       },
       true
-    ) // Skip proxy
+    )
 
     expect(result.success).toBe(true)
     expect(result.output).toBeDefined()
@@ -211,7 +214,6 @@ describe('executeTool Function', () => {
   })
 
   it('should call internal routes directly', async () => {
-    // Mock transformResponse for function_execute tool
     const originalFunctionTool = { ...tools.function_execute }
     tools.function_execute = {
       ...tools.function_execute,
@@ -230,10 +232,8 @@ describe('executeTool Function', () => {
       true
     ) // Skip proxy
 
-    // Restore original tool
     tools.function_execute = originalFunctionTool
 
-    // Expect transform response to have been called
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/function/execute'),
       expect.anything()
@@ -241,12 +241,10 @@ describe('executeTool Function', () => {
   })
 
   it('should handle non-existent tool', async () => {
-    // Create the mock with a matching implementation
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const result = await executeTool('non_existent_tool', {})
 
-    // Expect failure
     expect(result.success).toBe(false)
     expect(result.error).toContain('Tool not found')
 
@@ -254,20 +252,7 @@ describe('executeTool Function', () => {
   })
 
   it('should handle errors from tools', async () => {
-    // Mock a failed response
-    global.fetch = Object.assign(
-      vi.fn().mockImplementation(async () => {
-        return {
-          ok: false,
-          status: 400,
-          json: () =>
-            Promise.resolve({
-              error: 'Bad request',
-            }),
-        }
-      }),
-      { preconnect: vi.fn() }
-    ) as typeof fetch
+    setupFetchMock({ status: 400, ok: false, json: { error: 'Bad request' } })
 
     const result = await executeTool(
       'http_request',
@@ -304,9 +289,7 @@ describe('Automatic Internal Route Detection', () => {
 
   beforeEach(() => {
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
-    cleanupEnvVars = mockEnvironmentVariables({
-      NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
-    })
+    cleanupEnvVars = setupEnvVars({ NEXT_PUBLIC_APP_URL: 'http://localhost:3000' })
   })
 
   afterEach(() => {
@@ -315,7 +298,6 @@ describe('Automatic Internal Route Detection', () => {
   })
 
   it('should detect internal routes (URLs starting with /api/) and call them directly', async () => {
-    // Mock a tool with an internal route
     const mockTool = {
       id: 'test_internal_tool',
       name: 'Test Internal Tool',
@@ -333,14 +315,11 @@ describe('Automatic Internal Route Detection', () => {
       }),
     }
 
-    // Mock the tool registry to include our test tool
     const originalTools = { ...tools }
     ;(tools as any).test_internal_tool = mockTool
 
-    // Mock fetch for the internal API call
     global.fetch = Object.assign(
       vi.fn().mockImplementation(async (url) => {
-        // Should call the internal API directly, not the proxy
         expect(url).toBe('http://localhost:3000/api/test/endpoint')
         const responseData = { success: true, data: 'test' }
         return {
@@ -362,12 +341,10 @@ describe('Automatic Internal Route Detection', () => {
     expect(result.output.result).toBe('Internal route success')
     expect(mockTool.transformResponse).toHaveBeenCalled()
 
-    // Restore original tools
     Object.assign(tools, originalTools)
   })
 
   it('should detect external routes (full URLs) and use proxy', async () => {
-    // Mock a tool with an external route
     const mockTool = {
       id: 'test_external_tool',
       name: 'Test External Tool',
@@ -381,11 +358,9 @@ describe('Automatic Internal Route Detection', () => {
       },
     }
 
-    // Mock the tool registry to include our test tool
     const originalTools = { ...tools }
     ;(tools as any).test_external_tool = mockTool
 
-    // Mock fetch for the proxy call
     global.fetch = Object.assign(
       vi.fn().mockImplementation(async (url) => {
         // Should call the proxy, not the external API directly
@@ -416,7 +391,6 @@ describe('Automatic Internal Route Detection', () => {
   })
 
   it('should handle dynamic URLs that resolve to internal routes', async () => {
-    // Mock a tool with a dynamic URL function that returns internal route
     const mockTool = {
       id: 'test_dynamic_internal',
       name: 'Test Dynamic Internal Tool',
@@ -469,7 +443,6 @@ describe('Automatic Internal Route Detection', () => {
   })
 
   it('should handle dynamic URLs that resolve to external routes', async () => {
-    // Mock a tool with a dynamic URL function that returns external route
     const mockTool = {
       id: 'test_dynamic_external',
       name: 'Test Dynamic External Tool',
@@ -485,14 +458,11 @@ describe('Automatic Internal Route Detection', () => {
       },
     }
 
-    // Mock the tool registry to include our test tool
     const originalTools = { ...tools }
     ;(tools as any).test_dynamic_external = mockTool
 
-    // Mock fetch for the proxy call
     global.fetch = Object.assign(
       vi.fn().mockImplementation(async (url) => {
-        // Should call the proxy, not the external API directly
         expect(url).toBe('http://localhost:3000/api/proxy')
         const responseData = {
           success: true,
@@ -515,7 +485,6 @@ describe('Automatic Internal Route Detection', () => {
     expect(result.success).toBe(true)
     expect(result.output.result).toBe('Dynamic external route via proxy')
 
-    // Restore original tools
     Object.assign(tools, originalTools)
   })
 
@@ -568,9 +537,7 @@ describe('Centralized Error Handling', () => {
 
   beforeEach(() => {
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
-    cleanupEnvVars = mockEnvironmentVariables({
-      NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
-    })
+    cleanupEnvVars = setupEnvVars({ NEXT_PUBLIC_APP_URL: 'http://localhost:3000' })
   })
 
   afterEach(() => {
@@ -679,19 +646,19 @@ describe('Centralized Error Handling', () => {
     )
   })
 
-  it('should fall back to HTTP status when JSON parsing fails', async () => {
+  it('should fall back to text when JSON parsing fails and extract error message', async () => {
     global.fetch = Object.assign(
       vi.fn().mockImplementation(async () => ({
         ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
+        status: 401,
+        statusText: 'Unauthorized',
         headers: {
           get: (key: string) => (key === 'content-type' ? 'text/plain' : null),
           forEach: (callback: (value: string, key: string) => void) => {
             callback('text/plain', 'content-type')
           },
         },
-        text: () => Promise.resolve('Invalid JSON response'),
+        text: () => Promise.resolve('Invalid access token'),
         json: () => Promise.reject(new Error('Invalid JSON')),
         clone: vi.fn().mockReturnThis(),
       })),
@@ -705,7 +672,67 @@ describe('Centralized Error Handling', () => {
     )
 
     expect(result.success).toBe(false)
-    expect(result.error).toBe('Failed to parse response from function_execute: Error: Invalid JSON')
+    // Should extract the text error message, not the JSON parsing error
+    expect(result.error).toBe('Invalid access token')
+  })
+
+  it('should handle plain text error responses from APIs like Apollo', async () => {
+    global.fetch = Object.assign(
+      vi.fn().mockImplementation(async () => ({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'text/plain' : null),
+          forEach: (callback: (value: string, key: string) => void) => {
+            callback('text/plain', 'content-type')
+          },
+        },
+        text: () => Promise.resolve('Invalid API key provided'),
+        json: () => Promise.reject(new Error('Unexpected token I')),
+        clone: vi.fn().mockReturnThis(),
+      })),
+      { preconnect: vi.fn() }
+    ) as typeof fetch
+
+    const result = await executeTool(
+      'function_execute',
+      { code: 'return { result: "test" }' },
+      true
+    )
+
+    expect(result.success).toBe(false)
+    expect(result.error).toBe('Invalid API key provided')
+  })
+
+  it('should fall back to HTTP status text when both JSON and text parsing fail', async () => {
+    global.fetch = Object.assign(
+      vi.fn().mockImplementation(async () => ({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: {
+          get: (key: string) => (key === 'content-type' ? 'text/plain' : null),
+          forEach: (callback: (value: string, key: string) => void) => {
+            callback('text/plain', 'content-type')
+          },
+        },
+        text: () => Promise.reject(new Error('Cannot read response')),
+        json: () => Promise.reject(new Error('Invalid JSON')),
+        clone: vi.fn().mockReturnThis(),
+      })),
+      { preconnect: vi.fn() }
+    ) as typeof fetch
+
+    const result = await executeTool(
+      'function_execute',
+      { code: 'return { result: "test" }' },
+      true
+    )
+
+    expect(result.success).toBe(false)
+    // Should fall back to HTTP status text when both parsing methods fail
+    expect(result.error).toBe('Internal Server Error')
   })
 
   it('should handle complex nested error objects', async () => {
@@ -739,9 +766,7 @@ describe('MCP Tool Execution', () => {
 
   beforeEach(() => {
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
-    cleanupEnvVars = mockEnvironmentVariables({
-      NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
-    })
+    cleanupEnvVars = setupEnvVars({ NEXT_PUBLIC_APP_URL: 'http://localhost:3000' })
   })
 
   afterEach(() => {
@@ -778,7 +803,7 @@ describe('MCP Tool Execution', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const mockContext = createMockExecutionContext()
+    const mockContext = createToolExecutionContext()
 
     const result = await executeTool(
       'mcp-123-list_files',
@@ -814,7 +839,7 @@ describe('MCP Tool Execution', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const mockContext2 = createMockExecutionContext()
+    const mockContext2 = createToolExecutionContext()
 
     await executeTool(
       'mcp-timestamp123-complex-tool-name',
@@ -844,7 +869,7 @@ describe('MCP Tool Execution', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const mockContext3 = createMockExecutionContext()
+    const mockContext3 = createToolExecutionContext()
 
     await executeTool(
       'mcp-123-read_file',
@@ -878,7 +903,7 @@ describe('MCP Tool Execution', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const mockContext4 = createMockExecutionContext()
+    const mockContext4 = createToolExecutionContext()
 
     await executeTool(
       'mcp-123-search',
@@ -912,7 +937,7 @@ describe('MCP Tool Execution', () => {
       { preconnect: vi.fn() }
     ) as typeof fetch
 
-    const mockContext5 = createMockExecutionContext()
+    const mockContext5 = createToolExecutionContext()
 
     const result = await executeTool(
       'mcp-123-nonexistent_tool',
@@ -935,7 +960,7 @@ describe('MCP Tool Execution', () => {
   })
 
   it('should handle invalid MCP tool ID format', async () => {
-    const mockContext6 = createMockExecutionContext()
+    const mockContext6 = createToolExecutionContext()
 
     const result = await executeTool(
       'invalid-mcp-id',
@@ -954,7 +979,7 @@ describe('MCP Tool Execution', () => {
       preconnect: vi.fn(),
     }) as typeof fetch
 
-    const mockContext7 = createMockExecutionContext()
+    const mockContext7 = createToolExecutionContext()
 
     const result = await executeTool(
       'mcp-123-test_tool',

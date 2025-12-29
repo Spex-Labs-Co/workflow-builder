@@ -1,17 +1,17 @@
 import { db } from '@sim/db'
 import { copilotChats } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { desc, eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import {
   authenticateCopilotRequestSessionOnly,
   createInternalServerErrorResponse,
   createUnauthorizedResponse,
-} from '@/lib/copilot/auth'
-import { createLogger } from '@/lib/logs/console/logger'
+} from '@/lib/copilot/request-helpers'
 
 const logger = createLogger('CopilotChatsListAPI')
 
-export async function GET(_req: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const { userId, isAuthenticated } = await authenticateCopilotRequestSessionOnly()
     if (!isAuthenticated || !userId) {

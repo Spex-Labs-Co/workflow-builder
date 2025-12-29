@@ -11,7 +11,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { ListToolsResult, Tool } from '@modelcontextprotocol/sdk/types.js'
-import { createLogger } from '@/lib/logs/console/logger'
+import { createLogger } from '@sim/logger'
 import {
   McpConnectionError,
   type McpConnectionStatus,
@@ -42,6 +42,15 @@ export class McpClient {
     '2024-11-05', // Initial stable release
   ]
 
+  /**
+   * Creates a new MCP client
+   *
+   * No session ID parameter (we disconnect after each operation).
+   * The SDK handles session management automatically via Mcp-Session-Id header.
+   *
+   * @param config - Server configuration
+   * @param securityPolicy - Optional security policy
+   */
   constructor(config: McpServerConfig, securityPolicy?: McpSecurityPolicy) {
     this.config = config
     this.connectionStatus = { connected: false }
@@ -99,7 +108,7 @@ export class McpClient {
       this.connectionStatus.lastError = errorMessage
       this.isConnected = false
       logger.error(`Failed to connect to MCP server ${this.config.name}:`, error)
-      throw new McpConnectionError(errorMessage, this.config.id)
+      throw new McpConnectionError(errorMessage, this.config.name)
     }
   }
 
@@ -132,7 +141,7 @@ export class McpClient {
    */
   async listTools(): Promise<McpTool[]> {
     if (!this.isConnected) {
-      throw new McpConnectionError('Not connected to server', this.config.id)
+      throw new McpConnectionError('Not connected to server', this.config.name)
     }
 
     try {
@@ -161,7 +170,7 @@ export class McpClient {
    */
   async callTool(toolCall: McpToolCall): Promise<McpToolResult> {
     if (!this.isConnected) {
-      throw new McpConnectionError('Not connected to server', this.config.id)
+      throw new McpConnectionError('Not connected to server', this.config.name)
     }
 
     const consentRequest: McpConsentRequest = {
@@ -208,7 +217,7 @@ export class McpClient {
    */
   async ping(): Promise<{ _meta?: Record<string, any> }> {
     if (!this.isConnected) {
-      throw new McpConnectionError('Not connected to server', this.config.id)
+      throw new McpConnectionError('Not connected to server', this.config.name)
     }
 
     try {
@@ -253,6 +262,10 @@ export class McpClient {
   getNegotiatedVersion(): string | undefined {
     const serverVersion = this.client.getServerVersion()
     return typeof serverVersion === 'string' ? serverVersion : undefined
+  }
+
+  getSessionId(): string | undefined {
+    return this.transport.sessionId
   }
 
   /**

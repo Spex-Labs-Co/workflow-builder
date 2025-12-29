@@ -1,6 +1,6 @@
+import { createLogger } from '@sim/logger'
 import Stripe from 'stripe'
-import { env } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
+import { env } from '@/lib/core/config/env'
 
 const logger = createLogger('StripeClient')
 

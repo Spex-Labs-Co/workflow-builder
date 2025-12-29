@@ -1,9 +1,9 @@
 import { CopyObjectCommand, type ObjectCannedACL, S3Client } from '@aws-sdk/client-s3'
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkHybridAuth } from '@/lib/auth/hybrid'
-import { createLogger } from '@/lib/logs/console/logger'
-import { generateRequestId } from '@/lib/utils'
+import { generateRequestId } from '@/lib/core/utils/request'
 
 export const dynamic = 'force-dynamic'
 

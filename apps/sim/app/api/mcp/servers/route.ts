@@ -1,13 +1,17 @@
 import { db } from '@sim/db'
 import { mcpServers } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, eq, isNull } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
-import { createLogger } from '@/lib/logs/console/logger'
 import { getParsedBody, withMcpAuth } from '@/lib/mcp/middleware'
 import { mcpService } from '@/lib/mcp/service'
 import type { McpTransport } from '@/lib/mcp/types'
 import { validateMcpServerUrl } from '@/lib/mcp/url-validator'
-import { createMcpErrorResponse, createMcpSuccessResponse } from '@/lib/mcp/utils'
+import {
+  createMcpErrorResponse,
+  createMcpSuccessResponse,
+  generateMcpServerId,
+} from '@/lib/mcp/utils'
 
 const logger = createLogger('McpServersAPI')
 
@@ -50,13 +54,20 @@ export const GET = withMcpAuth('read')(
 
 /**
  * POST - Register a new MCP server for the workspace (requires write permission)
+ *
+ * Uses deterministic server IDs based on URL hash to ensure that re-adding
+ * the same server produces the same ID. This prevents "server not found" errors
+ * when workflows reference the old server ID after delete/re-add cycles.
+ *
+ * If a server with the same ID already exists (same URL in same workspace),
+ * it will be updated instead of creating a duplicate.
  */
 export const POST = withMcpAuth('write')(
   async (request: NextRequest, { userId, workspaceId, requestId }) => {
     try {
       const body = getParsedBody(request) || (await request.json())
 
-      logger.info(`[${requestId}] Registering new MCP server:`, {
+      logger.info(`[${requestId}] Registering MCP server:`, {
         name: body.name,
         transport: body.transport,
         workspaceId,
@@ -82,7 +93,45 @@ export const POST = withMcpAuth('write')(
         body.url = urlValidation.normalizedUrl
       }
 
-      const serverId = body.id || crypto.randomUUID()
+      const serverId = body.url ? generateMcpServerId(workspaceId, body.url) : crypto.randomUUID()
+
+      const [existingServer] = await db
+        .select({ id: mcpServers.id, deletedAt: mcpServers.deletedAt })
+        .from(mcpServers)
+        .where(and(eq(mcpServers.id, serverId), eq(mcpServers.workspaceId, workspaceId)))
+        .limit(1)
+
+      if (existingServer) {
+        logger.info(
+          `[${requestId}] Server with ID ${serverId} already exists, updating instead of creating`
+        )
+
+        await db
+          .update(mcpServers)
+          .set({
+            name: body.name,
+            description: body.description,
+            transport: body.transport,
+            url: body.url,
+            headers: body.headers || {},
+            timeout: body.timeout || 30000,
+            retries: body.retries || 3,
+            enabled: body.enabled !== false,
+            connectionStatus: 'connected',
+            lastConnected: new Date(),
+            updatedAt: new Date(),
+            deletedAt: null,
+          })
+          .where(eq(mcpServers.id, serverId))
+
+        await mcpService.clearCache(workspaceId)
+
+        logger.info(
+          `[${requestId}] Successfully updated MCP server: ${body.name} (ID: ${serverId})`
+        )
+
+        return createMcpSuccessResponse({ serverId, updated: true }, 200)
+      }
 
       await db
         .insert(mcpServers)
@@ -98,18 +147,21 @@ export const POST = withMcpAuth('write')(
           timeout: body.timeout || 30000,
           retries: body.retries || 3,
           enabled: body.enabled !== false,
+          connectionStatus: 'connected',
+          lastConnected: new Date(),
           createdAt: new Date(),
           updatedAt: new Date(),
         })
         .returning()
 
-      mcpService.clearCache(workspaceId)
+      await mcpService.clearCache(workspaceId)
 
-      logger.info(`[${requestId}] Successfully registered MCP server: ${body.name}`)
+      logger.info(
+        `[${requestId}] Successfully registered MCP server: ${body.name} (ID: ${serverId})`
+      )
 
-      // Track MCP server registration
       try {
-        const { trackPlatformEvent } = await import('@/lib/telemetry/tracer')
+        const { trackPlatformEvent } = await import('@/lib/core/telemetry')
         trackPlatformEvent('platform.mcp.server_added', {
           'mcp.server_id': serverId,
           'mcp.server_name': body.name,
@@ -164,7 +216,7 @@ export const DELETE = withMcpAuth('admin')(
         )
       }
 
-      mcpService.clearCache(workspaceId)
+      await mcpService.clearCache(workspaceId)
 
       logger.info(`[${requestId}] Successfully deleted MCP server: ${serverId}`)
       return createMcpSuccessResponse({ message: `Server ${serverId} deleted successfully` })

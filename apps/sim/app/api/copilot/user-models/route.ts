@@ -1,7 +1,7 @@
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
+import { getSession } from '@/lib/auth'
 import { db } from '@/../../packages/db'
 import { settings } from '@/../../packages/db/schema'
 
@@ -12,19 +12,27 @@ const DEFAULT_ENABLED_MODELS: Record<string, boolean> = {
   'gpt-4.1': false,
   'gpt-5-fast': false,
   'gpt-5': true,
-  'gpt-5-medium': true,
+  'gpt-5-medium': false,
   'gpt-5-high': false,
+  'gpt-5.1-fast': false,
+  'gpt-5.1': true,
+  'gpt-5.1-medium': true,
+  'gpt-5.1-high': false,
+  'gpt-5-codex': false,
+  'gpt-5.1-codex': true,
   o3: true,
   'claude-4-sonnet': false,
   'claude-4.5-haiku': true,
   'claude-4.5-sonnet': true,
-  'claude-4.1-opus': true,
+  'claude-4.5-opus': true,
+  // 'claude-4.1-opus': true,
+  'gemini-3-pro': true,
 }
 
 // GET - Fetch user's enabled models
 export async function GET(request: NextRequest) {
   try {
-    const session = await auth.api.getSession({ headers: request.headers })
+    const session = await getSession()
 
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -32,7 +40,6 @@ export async function GET(request: NextRequest) {
 
     const userId = session.user.id
 
-    // Try to fetch existing settings record
     const [userSettings] = await db
       .select()
       .from(settings)
@@ -42,13 +49,11 @@ export async function GET(request: NextRequest) {
     if (userSettings) {
       const userModelsMap = (userSettings.copilotEnabledModels as Record<string, boolean>) || {}
 
-      // Merge: start with defaults, then override with user's existing preferences
       const mergedModels = { ...DEFAULT_ENABLED_MODELS }
       for (const [modelId, enabled] of Object.entries(userModelsMap)) {
         mergedModels[modelId] = enabled
       }
 
-      // If we added any new models, update the database
       const hasNewModels = Object.keys(DEFAULT_ENABLED_MODELS).some(
         (key) => !(key in userModelsMap)
       )
@@ -68,7 +73,6 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // If no settings record exists, create one with defaults
     await db.insert(settings).values({
       id: userId,
       userId,
@@ -89,7 +93,7 @@ export async function GET(request: NextRequest) {
 // PUT - Update user's enabled models
 export async function PUT(request: NextRequest) {
   try {
-    const session = await auth.api.getSession({ headers: request.headers })
+    const session = await getSession()
 
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -102,11 +106,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'enabledModels must be an object' }, { status: 400 })
     }
 
-    // Check if settings record exists
     const [existing] = await db.select().from(settings).where(eq(settings.userId, userId)).limit(1)
 
     if (existing) {
-      // Update existing record
       await db
         .update(settings)
         .set({
@@ -115,7 +117,6 @@ export async function PUT(request: NextRequest) {
         })
         .where(eq(settings.userId, userId))
     } else {
-      // Create new settings record
       await db.insert(settings).values({
         id: userId,
         userId,

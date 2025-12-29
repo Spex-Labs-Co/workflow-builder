@@ -1,9 +1,9 @@
+import { createLogger } from '@sim/logger'
 import type { NextRequest, NextResponse } from 'next/server'
 import { checkHybridAuth } from '@/lib/auth/hybrid'
-import { createLogger } from '@/lib/logs/console/logger'
+import { generateRequestId } from '@/lib/core/utils/request'
 import { createMcpErrorResponse } from '@/lib/mcp/utils'
-import { getUserEntityPermissions } from '@/lib/permissions/utils'
-import { generateRequestId } from '@/lib/utils'
+import { getUserEntityPermissions } from '@/lib/workspaces/permissions/utils'
 
 const logger = createLogger('McpAuthMiddleware')
 
@@ -15,10 +15,10 @@ export interface McpAuthContext {
   requestId: string
 }
 
-export type McpRouteHandler = (
+export type McpRouteHandler<TParams = Record<string, string>> = (
   request: NextRequest,
   context: McpAuthContext,
-  ...args: any[]
+  routeContext: { params: Promise<TParams> }
 ) => Promise<NextResponse>
 
 interface AuthResult {
@@ -170,11 +170,13 @@ function getPermissionErrorMessage(permissionLevel: McpPermissionLevel): string 
  * @returns Middleware wrapper function
  *
  */
-export function withMcpAuth(permissionLevel: McpPermissionLevel = 'read') {
-  return function middleware(handler: McpRouteHandler) {
+export function withMcpAuth<TParams = Record<string, string>>(
+  permissionLevel: McpPermissionLevel = 'read'
+) {
+  return function middleware(handler: McpRouteHandler<TParams>) {
     return async function wrappedHandler(
       request: NextRequest,
-      ...args: any[]
+      routeContext: { params: Promise<TParams> }
     ): Promise<NextResponse> {
       const authResult = await validateMcpAuth(request, permissionLevel)
 
@@ -183,7 +185,7 @@ export function withMcpAuth(permissionLevel: McpPermissionLevel = 'read') {
       }
 
       try {
-        return await handler(request, (authResult as AuthResult).context, ...args)
+        return await handler(request, (authResult as AuthResult).context, routeContext)
       } catch (error) {
         logger.error(
           `[${(authResult as AuthResult).context.requestId}] Error in MCP route handler:`,

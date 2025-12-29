@@ -1,8 +1,8 @@
+import { createLogger } from '@sim/logger'
 import { nanoid } from 'nanoid'
 import { type NextRequest, NextResponse } from 'next/server'
 import { verifyCronAuth } from '@/lib/auth/internal'
-import { createLogger } from '@/lib/logs/console/logger'
-import { acquireLock, releaseLock } from '@/lib/redis'
+import { acquireLock, releaseLock } from '@/lib/core/config/redis'
 import { pollOutlookWebhooks } from '@/lib/webhooks/outlook-polling-service'
 
 const logger = createLogger('OutlookPollingAPI')
@@ -61,6 +61,8 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   } finally {
-    await releaseLock(LOCK_KEY).catch(() => {})
+    if (lockValue) {
+      await releaseLock(LOCK_KEY, lockValue).catch(() => {})
+    }
   }
 }

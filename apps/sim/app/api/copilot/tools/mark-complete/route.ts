@@ -1,15 +1,15 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import { SIM_AGENT_API_URL_DEFAULT } from '@/lib/copilot/constants'
 import {
   authenticateCopilotRequestSessionOnly,
   createBadRequestResponse,
   createInternalServerErrorResponse,
   createRequestTracker,
   createUnauthorizedResponse,
-} from '@/lib/copilot/auth'
-import { env } from '@/lib/env'
-import { createLogger } from '@/lib/logs/console/logger'
-import { SIM_AGENT_API_URL_DEFAULT } from '@/lib/sim-agent/constants'
+} from '@/lib/copilot/request-helpers'
+import { env } from '@/lib/core/config/env'
 
 const logger = createLogger('CopilotMarkToolCompleteAPI')
 

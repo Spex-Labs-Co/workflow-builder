@@ -1,5 +1,5 @@
+import { createLogger } from '@sim/logger'
 import { MicrosoftSharepointIcon } from '@/components/icons'
-import { createLogger } from '@/lib/logs/console/logger'
 import type { BlockConfig } from '@/blocks/types'
 import { AuthMode } from '@/blocks/types'
 import type { SharepointResponse } from '@/tools/sharepoint/types'
@@ -37,7 +37,6 @@ export const SharepointBlock: BlockConfig<SharepointResponse> = {
       id: 'credential',
       title: 'Microsoft Account',
       type: 'oauth-input',
-      provider: 'sharepoint',
       serviceId: 'sharepoint',
       requiredScopes: [
         'openid',
@@ -56,7 +55,6 @@ export const SharepointBlock: BlockConfig<SharepointResponse> = {
       title: 'Select Site',
       type: 'file-selector',
       canonicalParamId: 'siteId',
-      provider: 'microsoft',
       serviceId: 'sharepoint',
       requiredScopes: [
         'openid',
@@ -360,7 +358,7 @@ export const SharepointBlock: BlockConfig<SharepointResponse> = {
     folderPath: { type: 'string', description: 'Folder path for file upload' },
     fileName: { type: 'string', description: 'File name override' },
     uploadFiles: { type: 'json', description: 'Files to upload (UI upload)' },
-    files: { type: 'json', description: 'Files to upload (UserFile array)' },
+    files: { type: 'array', description: 'Files to upload (UserFile array)' },
   },
   outputs: {
     sites: {

@@ -54,7 +54,7 @@ describe('Azure Blob Storage Client', () => {
       toString: () => 'sv=2021-06-08&se=2023-01-01T00%3A00%3A00Z&sr=b&sp=r&sig=test',
     })
 
-    vi.doMock('@/lib/env', () => ({
+    vi.doMock('@/lib/core/config/env', () => ({
       env: {
         AZURE_ACCOUNT_NAME: 'testaccount',
         AZURE_ACCOUNT_KEY: 'testkey',
@@ -64,7 +64,7 @@ describe('Azure Blob Storage Client', () => {
       },
     }))
 
-    vi.doMock('@/lib/logs/console/logger', () => ({
+    vi.doMock('@sim/logger', () => ({
       createLogger: vi.fn().mockReturnValue({
         debug: vi.fn(),
         info: vi.fn(),

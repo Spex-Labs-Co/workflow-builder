@@ -1,10 +1,10 @@
 import { db } from '@sim/db'
 import { webhook } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getBaseUrl } from '@/lib/urls/utils'
-import { generateRequestId } from '@/lib/utils'
+import { generateRequestId } from '@/lib/core/utils/request'
+import { getBaseUrl } from '@/lib/core/utils/urls'
 
 const logger = createLogger('WebhookTestAPI')
 
@@ -441,7 +441,7 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      case 'microsoftteams': {
+      case 'microsoft-teams': {
         const hmacSecret = providerConfig.hmacSecret
 
         if (!hmacSecret) {

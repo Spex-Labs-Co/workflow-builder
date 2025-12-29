@@ -1,8 +1,11 @@
 import { useCallback, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { useRouter } from 'next/navigation'
-import { createLogger } from '@/lib/logs/console/logger'
-import { extractWorkflowName, extractWorkflowsFromZip } from '@/lib/workflows/import-export'
-import { useFolderStore } from '@/stores/folders/store'
+import {
+  extractWorkflowName,
+  extractWorkflowsFromZip,
+} from '@/lib/workflows/operations/import-export'
+import { useCreateFolder } from '@/hooks/queries/folders'
 import { useWorkflowDiffStore } from '@/stores/workflow-diff/store'
 import { parseWorkflowJson } from '@/stores/workflows/json/importer'
 
@@ -33,6 +36,7 @@ interface UseImportWorkspaceProps {
 export function useImportWorkspace({ onSuccess }: UseImportWorkspaceProps = {}) {
   const router = useRouter()
   const [isImporting, setIsImporting] = useState(false)
+  const createFolderMutation = useCreateFolder()
 
   /**
    * Handle workspace import from ZIP file
@@ -75,7 +79,6 @@ export function useImportWorkspace({ onSuccess }: UseImportWorkspaceProps = {}) 
         const { workspace: newWorkspace } = await createResponse.json()
         logger.info('Created new workspace:', newWorkspace)
 
-        const { createFolder } = useFolderStore.getState()
         const folderMap = new Map<string, string>()
 
         // Import workflows
@@ -100,7 +103,7 @@ export function useImportWorkspace({ onSuccess }: UseImportWorkspaceProps = {}) 
                   const pathSegment = workflow.folderPath.slice(0, i + 1).join('/')
 
                   if (!folderMap.has(pathSegment)) {
-                    const subFolder = await createFolder({
+                    const subFolder = await createFolderMutation.mutateAsync({
                       name: workflow.folderPath[i],
                       workspaceId: newWorkspace.id,
                       parentId: parentId || undefined,
@@ -192,7 +195,7 @@ export function useImportWorkspace({ onSuccess }: UseImportWorkspaceProps = {}) 
         setIsImporting(false)
       }
     },
-    [isImporting, router, onSuccess]
+    [isImporting, router, onSuccess, createFolderMutation]
   )
 
   return {

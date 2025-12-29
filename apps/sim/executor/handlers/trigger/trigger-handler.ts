@@ -1,5 +1,5 @@
-import { createLogger } from '@/lib/logs/console/logger'
-import { BlockType } from '@/executor/consts'
+import { createLogger } from '@sim/logger'
+import { BlockType } from '@/executor/constants'
 import type { BlockHandler, ExecutionContext } from '@/executor/types'
 import type { SerializedBlock } from '@/serializer/types'
 
@@ -55,7 +55,7 @@ export class TriggerBlockHandler implements BlockHandler {
             }
           }
 
-          if (provider === 'microsoftteams') {
+          if (provider === 'microsoft-teams') {
             const providerData = (starterOutput as any)[provider] || webhookData[provider] || {}
             const payloadSource = providerData?.message?.raw || webhookData.payload || {}
             return {

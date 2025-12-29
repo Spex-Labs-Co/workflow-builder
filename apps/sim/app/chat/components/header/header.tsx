@@ -4,7 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { GithubIcon } from '@/components/icons'
 import { useBrandConfig } from '@/lib/branding/branding'
-import { inter } from '@/app/fonts/inter/inter'
+import { inter } from '@/app/_styles/fonts/inter/inter'
 
 interface ChatHeaderProps {
   chatConfig: {
@@ -37,6 +37,7 @@ export function ChatHeader({ chatConfig, starCount }: ChatHeaderProps) {
               alt={`${chatConfig?.title || 'Chat'} logo`}
               width={24}
               height={24}
+              unoptimized
               className='h-6 w-6 rounded-md object-cover'
             />
           )}

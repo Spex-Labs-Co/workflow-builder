@@ -1,8 +1,8 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
 import { checkHybridAuth } from '@/lib/auth/hybrid'
-import { createLogger } from '@/lib/logs/console/logger'
-import { validateImageUrl } from '@/lib/security/input-validation'
-import { generateRequestId } from '@/lib/utils'
+import { validateImageUrl } from '@/lib/core/security/input-validation'
+import { generateRequestId } from '@/lib/core/utils/request'
 
 const logger = createLogger('ImageProxyAPI')
 

@@ -1,9 +1,10 @@
+import { randomUUID } from 'crypto'
 import { db } from '@sim/db'
-import { pausedExecutions, resumeQueue } from '@sim/db/schema'
+import { pausedExecutions, resumeQueue, workflowExecutionLogs } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm'
 import type { Edge } from 'reactflow'
-import { v4 as uuidv4 } from 'uuid'
-import { createLogger } from '@/lib/logs/console/logger'
+import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { executeWorkflowCore } from '@/lib/workflows/executor/execution-core'
 import { ExecutionSnapshot } from '@/executor/execution/snapshot'
@@ -121,7 +122,7 @@ export class PauseResumeManager {
     await db
       .insert(pausedExecutions)
       .values({
-        id: uuidv4(),
+        id: randomUUID(),
         workflowId,
         executionId,
         executionSnapshot: snapshotSeed,
@@ -153,6 +154,11 @@ export class PauseResumeManager {
           updatedAt: now,
         },
       })
+
+    await db
+      .update(workflowExecutionLogs)
+      .set({ status: 'pending' })
+      .where(eq(workflowExecutionLogs.executionId, executionId))
 
     await PauseResumeManager.processQueuedResumes(executionId)
   }
@@ -197,7 +203,6 @@ export class PauseResumeManager {
         .limit(1)
         .then((rows) => rows[0])
 
-      // Use the original execution ID for resume to maintain continuity in logs
       const resumeExecutionId = executionId
       const now = new Date()
 
@@ -205,7 +210,7 @@ export class PauseResumeManager {
         const [entry] = await tx
           .insert(resumeQueue)
           .values({
-            id: uuidv4(),
+            id: randomUUID(),
             pausedExecutionId: pausedExecution.id,
             parentExecutionId: executionId,
             newExecutionId: resumeExecutionId,
@@ -243,7 +248,7 @@ export class PauseResumeManager {
         }
       }
 
-      const resumeEntryId = uuidv4()
+      const resumeEntryId = randomUUID()
       await tx.insert(resumeQueue).values({
         id: resumeEntryId,
         pausedExecutionId: pausedExecution.id,
@@ -315,7 +320,6 @@ export class PauseResumeManager {
           pausedExecutionId: pausedExecution.id,
           contextId,
           pauseBlockId: pauseBlockId,
-          result,
         })
       }
 
@@ -331,6 +335,7 @@ export class PauseResumeManager {
       await PauseResumeManager.markResumeFailed({
         resumeEntryId,
         pausedExecutionId: pausedExecution.id,
+        parentExecutionId: pausedExecution.executionId,
         contextId,
         failureReason: (error as Error).message,
       })
@@ -353,6 +358,12 @@ export class PauseResumeManager {
     userId: string
   }): Promise<ExecutionResult> {
     const { resumeExecutionId, pausedExecution, contextId, resumeInput, userId } = args
+    const parentExecutionId = pausedExecution.executionId
+
+    await db
+      .update(workflowExecutionLogs)
+      .set({ status: 'running' })
+      .where(eq(workflowExecutionLogs.executionId, parentExecutionId))
 
     logger.info('Starting resume execution', {
       resumeExecutionId,
@@ -636,11 +647,14 @@ export class PauseResumeManager {
 
     const metadata = {
       ...baseSnapshot.metadata,
-      executionId: resumeExecutionId, // Same as original
-      requestId: baseSnapshot.metadata.requestId, // Keep original requestId
+      executionId: resumeExecutionId,
+      requestId: baseSnapshot.metadata.requestId,
       startTime: new Date().toISOString(),
       userId,
+      sessionUserId: baseSnapshot.metadata.sessionUserId,
+      workflowUserId: baseSnapshot.metadata.workflowUserId,
       useDraftState: baseSnapshot.metadata.useDraftState,
+      isClientSession: baseSnapshot.metadata.isClientSession,
       resumeFromSnapshot: true,
     }
 
@@ -648,7 +662,6 @@ export class PauseResumeManager {
       metadata,
       baseSnapshot.workflow,
       resumeInput ?? {},
-      baseSnapshot.environmentVariables || {},
       baseSnapshot.workflowVariables || {},
       baseSnapshot.selectedOutputs || [],
       stateCopy
@@ -666,19 +679,61 @@ export class PauseResumeManager {
       'manual'
     const loggingSession = new LoggingSession(
       metadata.workflowId,
-      resumeExecutionId,
+      parentExecutionId,
       triggerType,
       metadata.requestId
     )
+
+    logger.info('Running preprocessing checks for resume', {
+      resumeExecutionId,
+      workflowId: pausedExecution.workflowId,
+      userId,
+    })
+
+    const preprocessingResult = await preprocessExecution({
+      workflowId: pausedExecution.workflowId,
+      userId,
+      triggerType: 'manual', // Resume is manual
+      executionId: resumeExecutionId,
+      requestId: metadata.requestId,
+      checkRateLimit: false, // Manual actions bypass rate limits
+      checkDeployment: false, // Resuming existing execution
+      skipUsageLimits: true, // Resume is continuation of authorized execution - don't recheck limits
+      workspaceId: baseSnapshot.metadata.workspaceId,
+      loggingSession,
+      isResumeContext: true, // Enable billing fallback for paused workflow resumes
+    })
+
+    if (!preprocessingResult.success) {
+      const errorMessage =
+        preprocessingResult.error?.message || 'Preprocessing check failed for resume execution'
+      logger.error('Resume preprocessing failed', {
+        resumeExecutionId,
+        workflowId: pausedExecution.workflowId,
+        userId,
+        error: errorMessage,
+      })
+
+      throw new Error(errorMessage)
+    }
+
+    logger.info('Preprocessing checks passed for resume', {
+      resumeExecutionId,
+      actorUserId: preprocessingResult.actorUserId,
+    })
+
+    if (preprocessingResult.actorUserId) {
+      metadata.userId = preprocessingResult.actorUserId
+    }
 
     logger.info('Invoking executeWorkflowCore for resume', {
       resumeExecutionId,
       triggerType,
       useDraftState: metadata.useDraftState,
       resumeFromSnapshot: metadata.resumeFromSnapshot,
+      actorUserId: metadata.userId,
     })
 
-    // For resume executions, pass a flag to skip creating a new log entry
     return await executeWorkflowCore({
       snapshot: resumeSnapshot,
       callbacks: {},
@@ -722,6 +777,11 @@ export class PauseResumeManager {
           .update(pausedExecutions)
           .set({ status: 'fully_resumed', updatedAt: now })
           .where(eq(pausedExecutions.executionId, parentExecutionId))
+      } else {
+        await tx
+          .update(workflowExecutionLogs)
+          .set({ status: 'pending' })
+          .where(eq(workflowExecutionLogs.executionId, parentExecutionId))
       }
     })
   }
@@ -729,6 +789,7 @@ export class PauseResumeManager {
   private static async markResumeFailed(args: {
     resumeEntryId: string
     pausedExecutionId: string
+    parentExecutionId: string
     contextId: string
     failureReason: string
   }): Promise<void> {
@@ -746,6 +807,11 @@ export class PauseResumeManager {
           pausePoints: sql`jsonb_set(pause_points, ARRAY[${args.contextId}, 'resumeStatus'], '"failed"'::jsonb)`,
         })
         .where(eq(pausedExecutions.id, args.pausedExecutionId))
+
+      await tx
+        .update(workflowExecutionLogs)
+        .set({ status: 'failed' })
+        .where(eq(workflowExecutionLogs.executionId, args.parentExecutionId))
     })
   }
 
@@ -753,11 +819,9 @@ export class PauseResumeManager {
     pausedExecutionId: string
     contextId: string
     pauseBlockId: string
-    result: ExecutionResult
   }): Promise<void> {
-    const { pausedExecutionId, contextId, pauseBlockId, result } = args
+    const { pausedExecutionId, contextId, pauseBlockId } = args
 
-    // Load the current snapshot from the database
     const pausedExecution = await db
       .select()
       .from(pausedExecutions)

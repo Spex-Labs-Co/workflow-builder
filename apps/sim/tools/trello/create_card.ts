@@ -1,4 +1,4 @@
-import { env } from '@/lib/env'
+import { env } from '@/lib/core/config/env'
 import type { TrelloCreateCardParams, TrelloCreateCardResponse } from '@/tools/trello/types'
 import type { ToolConfig } from '@/tools/types'
 
@@ -119,11 +119,9 @@ export const trelloCreateCardTool: ToolConfig<TrelloCreateCardParams, TrelloCrea
   },
 
   outputs: {
-    success: { type: 'boolean', description: 'Whether the card was created successfully' },
     card: {
       type: 'object',
       description: 'The created card object with id, name, desc, url, and other properties',
     },
-    error: { type: 'string', description: 'Error message if operation failed' },
   },
 }

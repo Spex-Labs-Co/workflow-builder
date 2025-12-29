@@ -1,11 +1,12 @@
 import { db } from '@sim/db'
 import { environment } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSession } from '@/lib/auth'
-import { createLogger } from '@/lib/logs/console/logger'
-import { decryptSecret, encryptSecret, generateRequestId } from '@/lib/utils'
+import { decryptSecret, encryptSecret } from '@/lib/core/security/encryption'
+import { generateRequestId } from '@/lib/core/utils/request'
 import type { EnvironmentVariable } from '@/stores/settings/environment/types'
 
 const logger = createLogger('EnvironmentAPI')

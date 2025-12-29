@@ -5,7 +5,7 @@
 /**
  * Fallback free credits (in dollars) when env var is not set
  */
-export const DEFAULT_FREE_CREDITS = 10
+export const DEFAULT_FREE_CREDITS = 20
 
 /**
  * Default per-user minimum limits (in dollars) for paid plans when env vars are absent
@@ -19,6 +19,11 @@ export const DEFAULT_ENTERPRISE_TIER_COST_LIMIT = 200
  * This charge is applied regardless of whether the workflow uses AI models
  */
 export const BASE_EXECUTION_CHARGE = 0.001
+
+/**
+ * Fixed cost for search tool invocation (in dollars)
+ */
+export const SEARCH_TOOL_COST = 0.01
 
 /**
  * Default threshold (in dollars) for incremental overage billing

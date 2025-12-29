@@ -1,24 +1,36 @@
 # ========================================
-# Base Stage: Alpine Linux with Bun
+# Base Stage: Debian-based Bun with Node.js 22
 # ========================================
-FROM oven/bun:1.2.22-alpine AS base
+FROM oven/bun:1.3.3-slim AS base
+
+# Install Node.js 22 and common dependencies once in base stage
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv make g++ curl ca-certificates bash ffmpeg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs
 
 # ========================================
 # Dependencies Stage: Install Dependencies
 # ========================================
 FROM base AS deps
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install turbo globally
-RUN bun install -g turbo
-
 COPY package.json bun.lock turbo.json ./
-RUN mkdir -p apps packages/db
+RUN mkdir -p apps packages/db packages/testing packages/logger packages/tsconfig
 COPY apps/sim/package.json ./apps/sim/package.json
 COPY packages/db/package.json ./packages/db/package.json
+COPY packages/testing/package.json ./packages/testing/package.json
+COPY packages/logger/package.json ./packages/logger/package.json
+COPY packages/tsconfig/package.json ./packages/tsconfig/package.json
 
-RUN bun install --omit dev --ignore-scripts
+# Install turbo globally, then dependencies, then rebuild isolated-vm for Node.js
+RUN --mount=type=cache,id=bun-cache,target=/root/.bun/install/cache \
+    --mount=type=cache,id=npm-cache,target=/root/.npm \
+    bun install -g turbo && \
+    HUSKY=0 bun install --omit=dev --ignore-scripts && \
+    cd node_modules/.bun/isolated-vm@*/node_modules/isolated-vm && npx node-gyp rebuild --release && cd /app
 
 # ========================================
 # Builder Stage: Build the Application
@@ -26,18 +38,34 @@ RUN bun install --omit dev --ignore-scripts
 FROM base AS builder
 WORKDIR /app
 
-# Install turbo globally in builder stage
-RUN bun install -g turbo
+# Install turbo globally (cached for fast reinstall)
+RUN --mount=type=cache,id=bun-cache,target=/root/.bun/install/cache \
+    bun install -g turbo
 
+# Copy node_modules from deps stage (cached if dependencies don't change)
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 
-# Installing with full context to prevent missing dependencies error
-RUN bun install --omit dev --ignore-scripts
+# Copy package configuration files (needed for build)
+COPY package.json bun.lock turbo.json ./
+COPY apps/sim/package.json ./apps/sim/package.json
+COPY packages/db/package.json ./packages/db/package.json
+COPY packages/testing/package.json ./packages/testing/package.json
+COPY packages/logger/package.json ./packages/logger/package.json
+
+# Copy workspace configuration files (needed for turbo)
+COPY apps/sim/next.config.ts ./apps/sim/next.config.ts
+COPY apps/sim/tsconfig.json ./apps/sim/tsconfig.json
+COPY apps/sim/tailwind.config.ts ./apps/sim/tailwind.config.ts
+COPY apps/sim/postcss.config.mjs ./apps/sim/postcss.config.mjs
+
+# Copy source code (changes most frequently - placed last to maximize cache hits)
+COPY apps/sim ./apps/sim
+COPY packages ./packages
 
 # Required for standalone nextjs build
 WORKDIR /app/apps/sim
-RUN bun install sharp
+RUN --mount=type=cache,id=bun-cache,target=/root/.bun/install/cache \
+    HUSKY=0 bun install sharp
 
 ENV NEXT_TELEMETRY_DISABLED=1 \
     VERCEL_TELEMETRY_DISABLED=1 \
@@ -64,28 +92,33 @@ RUN bun run build
 FROM base AS runner
 WORKDIR /app
 
-# Install Python and dependencies for guardrails PII detection
-RUN apk add --no-cache python3 py3-pip bash
-
+# Node.js 22, Python, ffmpeg, etc. are already installed in base stage
 ENV NODE_ENV=production
 
 # Create non-root user and group
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs nextjs
 
+# Copy application artifacts from builder
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/public ./apps/sim/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/.next/static ./apps/sim/.next/static
 
-# Guardrails setup (files need to be owned by nextjs for runtime)
-COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/guardrails/setup.sh ./apps/sim/lib/guardrails/setup.sh
+# Copy isolated-vm native module (compiled for Node.js in deps stage)
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules/.bun/isolated-vm@6.0.2/node_modules/isolated-vm ./node_modules/isolated-vm
+
+# Copy the isolated-vm worker script
+COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/execution/isolated-vm-worker.cjs ./apps/sim/lib/execution/isolated-vm-worker.cjs
+
+# Guardrails setup with pip caching
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/guardrails/requirements.txt ./apps/sim/lib/guardrails/requirements.txt
 COPY --from=builder --chown=nextjs:nodejs /app/apps/sim/lib/guardrails/validate_pii.py ./apps/sim/lib/guardrails/validate_pii.py
 
-# Run guardrails setup as root, then fix ownership of generated venv files
-RUN chmod +x ./apps/sim/lib/guardrails/setup.sh && \
-    cd ./apps/sim/lib/guardrails && \
-    ./setup.sh && \
+# Install Python dependencies with pip cache mount for faster rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv ./apps/sim/lib/guardrails/venv && \
+    ./apps/sim/lib/guardrails/venv/bin/pip install --upgrade pip && \
+    ./apps/sim/lib/guardrails/venv/bin/pip install -r ./apps/sim/lib/guardrails/requirements.txt && \
     chown -R nextjs:nodejs /app/apps/sim/lib/guardrails
 
 # Create .next/cache directory with correct ownership

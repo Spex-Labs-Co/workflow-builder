@@ -10,21 +10,22 @@ import { BlockInfoCard } from "@/components/ui/block-info-card"
   color="#F64F9E"
 />
 
-## Gebrauchsanweisung
+## Nutzungsanweisungen
 
-Memory in den Workflow integrieren. Kann Erinnerungen hinzufügen, eine Erinnerung abrufen, alle Erinnerungen abrufen und Erinnerungen löschen.
+Integrieren Sie Memory in den Workflow. Kann Erinnerungen hinzufügen, abrufen, alle Erinnerungen abrufen und Erinnerungen löschen.
 
 ## Tools
 
 ### `memory_add`
 
-Füge eine neue Erinnerung zur Datenbank hinzu oder ergänze bestehende Erinnerungen mit derselben ID.
+Fügen Sie eine neue Erinnerung zur Datenbank hinzu oder hängen Sie sie an eine bestehende Erinnerung mit derselben ID an.
 
 #### Eingabe
 
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
-| `id` | string | Ja | Kennung für die Erinnerung. Wenn bereits eine Erinnerung mit dieser ID existiert, werden die neuen Daten hinzugefügt. |
+| `conversationId` | string | Nein | Konversationskennung \(z. B. user-123, session-abc\). Wenn bereits eine Erinnerung mit dieser conversationId existiert, wird die neue Nachricht an diese angehängt. |
+| `id` | string | Nein | Legacy-Parameter für Konversationskennung. Verwenden Sie stattdessen conversationId. Wird aus Gründen der Abwärtskompatibilität bereitgestellt. |
 | `role` | string | Ja | Rolle für Agent-Erinnerung \(user, assistant oder system\) |
 | `content` | string | Ja | Inhalt für Agent-Erinnerung |
 
@@ -32,28 +33,29 @@ Füge eine neue Erinnerung zur Datenbank hinzu oder ergänze bestehende Erinneru
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
-| `success` | boolean | Ob der Speicher erfolgreich hinzugefügt wurde |
-| `memories` | array | Array von Speicherobjekten einschließlich des neuen oder aktualisierten Speichers |
+| `success` | boolean | Ob die Erinnerung erfolgreich hinzugefügt wurde |
+| `memories` | array | Array von Erinnerungsobjekten einschließlich der neuen oder aktualisierten Erinnerung |
 | `error` | string | Fehlermeldung, falls der Vorgang fehlgeschlagen ist |
 
 ### `memory_get`
 
-Einen bestimmten Speicher anhand seiner ID abrufen
+Erinnerung nach conversationId abrufen. Gibt übereinstimmende Erinnerungen zurück.
 
 #### Eingabe
 
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
-| `id` | string | Ja | Kennung für den abzurufenden Speicher |
+| `conversationId` | string | Nein | Konversationskennung \(z. B. user-123, session-abc\). Gibt Erinnerungen für diese Konversation zurück. |
+| `id` | string | Nein | Legacy-Parameter für Konversationskennung. Verwenden Sie stattdessen conversationId. Wird aus Gründen der Abwärtskompatibilität bereitgestellt. |
 
 #### Ausgabe
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
 | `success` | boolean | Ob der Speicher erfolgreich abgerufen wurde |
-| `memories` | array | Array von Speicherdaten für die angeforderte ID |
+| `memories` | array | Array von Speicherobjekten mit conversationId- und data-Feldern |
 | `message` | string | Erfolgs- oder Fehlermeldung |
-| `error` | string | Fehlermeldung, falls der Vorgang fehlgeschlagen ist |
+| `error` | string | Fehlermeldung, falls fehlgeschlagen |
 
 ### `memory_get_all`
 
@@ -69,27 +71,28 @@ Alle Speicher aus der Datenbank abrufen
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
 | `success` | boolean | Ob alle Speicher erfolgreich abgerufen wurden |
-| `memories` | array | Array aller Speicherobjekte mit Schlüsseln, Typen und Daten |
+| `memories` | array | Array aller Speicherobjekte mit key-, conversationId- und data-Feldern |
 | `message` | string | Erfolgs- oder Fehlermeldung |
-| `error` | string | Fehlermeldung, falls der Vorgang fehlgeschlagen ist |
+| `error` | string | Fehlermeldung, falls fehlgeschlagen |
 
 ### `memory_delete`
 
-Eine bestimmte Erinnerung anhand ihrer ID löschen
+Speicher nach conversationId löschen.
 
 #### Eingabe
 
 | Parameter | Typ | Erforderlich | Beschreibung |
 | --------- | ---- | -------- | ----------- |
-| `id` | string | Ja | Kennung für die zu löschende Erinnerung |
+| `conversationId` | string | Nein | Konversationskennung (z. B. user-123, session-abc). Löscht alle Speicher für diese Konversation. |
+| `id` | string | Nein | Legacy-Parameter für Konversationskennung. Verwenden Sie stattdessen conversationId. Wird aus Gründen der Abwärtskompatibilität bereitgestellt. |
 
 #### Ausgabe
 
 | Parameter | Typ | Beschreibung |
 | --------- | ---- | ----------- |
-| `success` | boolean | Ob die Erinnerung erfolgreich gelöscht wurde |
+| `success` | boolean | Ob der Speicher erfolgreich gelöscht wurde |
 | `message` | string | Erfolgs- oder Fehlermeldung |
-| `error` | string | Fehlermeldung, wenn der Vorgang fehlgeschlagen ist |
+| `error` | string | Fehlermeldung, falls fehlgeschlagen |
 
 ## Hinweise
 

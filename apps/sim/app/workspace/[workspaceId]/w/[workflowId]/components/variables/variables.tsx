@@ -3,27 +3,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import Editor from 'react-simple-code-editor'
-import type { ComboboxOption } from '@/components/emcn'
 import {
   Badge,
   Button,
   Code,
   Combobox,
+  type ComboboxOption,
   calculateGutterWidth,
   getCodeEditorProps,
   highlight,
   Input,
+  Label,
   languages,
 } from '@/components/emcn'
-import { Label } from '@/components/emcn/components/label/label'
 import { Trash } from '@/components/emcn/icons/trash'
-import { cn, validateName } from '@/lib/utils'
+import { cn } from '@/lib/core/utils/cn'
+import { validateName } from '@/lib/core/utils/validation'
+import {
+  useFloatBoundarySync,
+  useFloatDrag,
+  useFloatResize,
+  usePreventZoom,
+} from '@/app/workspace/[workspaceId]/w/[workflowId]/hooks'
 import { useCollaborativeWorkflow } from '@/hooks/use-collaborative-workflow'
 import { useVariablesStore as usePanelVariablesStore } from '@/stores/panel/variables/store'
-import { getVariablesPosition, useVariablesStore } from '@/stores/variables/store'
+import {
+  getVariablesPosition,
+  MAX_VARIABLES_HEIGHT,
+  MAX_VARIABLES_WIDTH,
+  MIN_VARIABLES_HEIGHT,
+  MIN_VARIABLES_WIDTH,
+  useVariablesStore,
+} from '@/stores/variables/store'
 import type { Variable } from '@/stores/variables/types'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-import { useChatBoundarySync, useChatDrag, useChatResize } from '../chat/hooks'
 
 /**
  * Type options for variable type selection
@@ -41,7 +54,7 @@ const TYPE_OPTIONS: ComboboxOption[] = [
  */
 const BADGE_HEIGHT = 20
 const BADGE_TEXT_SIZE = 13
-const ICON_SIZE = 14
+const ICON_SIZE = 13
 const HEADER_ICON_SIZE = 16
 const LINE_HEIGHT = 21
 const MIN_EDITOR_HEIGHT = 120
@@ -96,14 +109,14 @@ export function Variables() {
     [position, width, height]
   )
 
-  const { handleMouseDown } = useChatDrag({
+  const { handleMouseDown } = useFloatDrag({
     position: actualPosition,
     width,
     height,
     onPositionChange: setPosition,
   })
 
-  useChatBoundarySync({
+  useFloatBoundarySync({
     isOpen,
     position: actualPosition,
     width,
@@ -116,13 +129,19 @@ export function Variables() {
     handleMouseMove: handleResizeMouseMove,
     handleMouseLeave: handleResizeMouseLeave,
     handleMouseDown: handleResizeMouseDown,
-  } = useChatResize({
+  } = useFloatResize({
     position: actualPosition,
     width,
     height,
     onPositionChange: setPosition,
     onDimensionsChange: setDimensions,
+    minWidth: MIN_VARIABLES_WIDTH,
+    minHeight: MIN_VARIABLES_HEIGHT,
+    maxWidth: MAX_VARIABLES_WIDTH,
+    maxHeight: MAX_VARIABLES_HEIGHT,
   })
+
+  const preventZoomRef = usePreventZoom()
 
   const [collapsedById, setCollapsedById] = useState<Record<string, boolean>>({})
   const [localNames, setLocalNames] = useState<Record<string, string>>({})
@@ -373,7 +392,8 @@ export function Variables() {
 
   return (
     <div
-      className='fixed z-30 flex flex-col overflow-hidden rounded-[6px] bg-[var(--surface-1)] px-[10px] pt-[2px] pb-[8px]'
+      ref={preventZoomRef}
+      className='fixed z-30 flex flex-col overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-1)] px-[10px] pt-[2px] pb-[8px]'
       style={{
         left: `${actualPosition.x}px`,
         top: `${actualPosition.y}px`,
@@ -421,7 +441,7 @@ export function Variables() {
       {/* Content */}
       <div className='flex flex-1 flex-col overflow-hidden pt-[8px]'>
         {workflowVariables.length === 0 ? (
-          <div className='flex flex-1 items-center justify-center text-[13px] text-[var(--text-tertiary)]'>
+          <div className='flex h-full items-center justify-center text-[#8D8D8D] text-[13px]'>
             {STRINGS.emptyState}
           </div>
         ) : (
@@ -431,7 +451,7 @@ export function Variables() {
                 <div
                   key={variable.id}
                   className={cn(
-                    'rounded-[4px] border border-[var(--border-strong)] bg-[var(--surface-1)]',
+                    'rounded-[4px] border border-[var(--border-1)] bg-[var(--surface-1)]',
                     (collapsedById[variable.id] ?? false) ? 'overflow-hidden' : 'overflow-visible'
                   )}
                 >
@@ -440,7 +460,7 @@ export function Variables() {
                   {!(collapsedById[variable.id] ?? false) && (
                     <div
                       id={`variable-content-${variable.id}`}
-                      className='flex flex-col gap-[6px] border-[var(--border-strong)] border-t px-[10px] pt-[6px] pb-[10px]'
+                      className='flex flex-col gap-[6px] border-[var(--border-1)] border-t px-[10px] pt-[6px] pb-[10px]'
                     >
                       <div className='flex flex-col gap-[4px]'>
                         <Label className='text-[13px]'>{STRINGS.labels.name}</Label>

@@ -1,7 +1,7 @@
 'use client'
 
 import type * as React from 'react'
-import { blockTypeToIconMap } from './icon-mapping'
+import { blockTypeToIconMap } from '@/components/ui/icon-mapping'
 
 interface BlockInfoCardProps {
   type: string
@@ -24,7 +24,7 @@ export function BlockInfoCard({
       <div className='flex items-center justify-center p-6'>
         <div
           className='flex h-20 w-20 items-center justify-center rounded-lg'
-          style={{ backgroundColor: color }}
+          style={{ background: color }}
         >
           {ResolvedIcon ? (
             <ResolvedIcon className='h-10 w-10 text-white' />

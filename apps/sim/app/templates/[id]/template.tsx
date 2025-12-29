@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { formatDistanceToNow } from 'date-fns'
 import {
-  ArrowLeft,
   ChartNoAxesColumn,
   ChevronDown,
   Globe,
@@ -16,6 +16,7 @@ import {
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import {
+  Breadcrumb,
   Button,
   Copy,
   Popover,
@@ -29,16 +30,106 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useSession } from '@/lib/auth-client'
-import { createLogger } from '@/lib/logs/console/logger'
-import { getBaseUrl } from '@/lib/urls/utils'
-import { cn } from '@/lib/utils'
-import type { CredentialRequirement } from '@/lib/workflows/credential-extractor'
-import type { Template } from '@/app/templates/templates'
+import { Skeleton } from '@/components/ui/skeleton'
+import { VerifiedBadge } from '@/components/ui/verified-badge'
+import { useSession } from '@/lib/auth/auth-client'
+import { cn } from '@/lib/core/utils/cn'
+import { getBaseUrl } from '@/lib/core/utils/urls'
+import type { CredentialRequirement } from '@/lib/workflows/credentials/credential-extractor'
 import { WorkflowPreview } from '@/app/workspace/[workspaceId]/w/components/workflow-preview/workflow-preview'
 import { getBlock } from '@/blocks/registry'
+import { useStarTemplate, useTemplate } from '@/hooks/queries/templates'
 
 const logger = createLogger('TemplateDetails')
+
+interface TemplateDetailsLoadingProps {
+  isWorkspaceContext?: boolean
+  workspaceId?: string | null
+}
+
+function TemplateDetailsLoading({ isWorkspaceContext, workspaceId }: TemplateDetailsLoadingProps) {
+  const breadcrumbItems = [
+    {
+      label: 'Templates',
+      href:
+        isWorkspaceContext && workspaceId ? `/workspace/${workspaceId}/templates` : '/templates',
+    },
+    { label: 'Template' },
+  ]
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col',
+        isWorkspaceContext ? 'h-full flex-1 overflow-hidden' : 'min-h-screen'
+      )}
+    >
+      <div className={cn('flex flex-1', isWorkspaceContext && 'overflow-hidden')}>
+        <div
+          className={cn(
+            'flex flex-1 flex-col px-[24px] pt-[24px] pb-[24px]',
+            isWorkspaceContext ? 'overflow-auto bg-white dark:bg-[var(--bg)]' : 'overflow-visible'
+          )}
+        >
+          {/* Breadcrumb navigation */}
+          <Breadcrumb items={breadcrumbItems} />
+
+          {/* Template name and action buttons */}
+          <div className='mt-[14px] flex items-center justify-between'>
+            <Skeleton className='h-[27px] w-[250px] rounded-[4px]' />
+            <div className='flex items-center gap-[8px]'>
+              <Skeleton className='h-[32px] w-[80px] rounded-[6px]' />
+            </div>
+          </div>
+
+          {/* Template tagline */}
+          <div className='mt-[4px]'>
+            <Skeleton className='h-[21px] w-[400px] rounded-[4px]' />
+          </div>
+
+          {/* Creator and stats row */}
+          <div className='mt-[16px] flex items-center gap-[8px]'>
+            {/* Star icon and count */}
+            <Skeleton className='h-[14px] w-[14px] rounded-[2px]' />
+            <Skeleton className='h-[21px] w-[24px] rounded-[4px]' />
+
+            {/* Views icon and count */}
+            <Skeleton className='h-[16px] w-[16px] rounded-[2px]' />
+            <Skeleton className='h-[21px] w-[32px] rounded-[4px]' />
+
+            {/* Vertical divider */}
+            <div className='mx-[4px] mb-[-1.5px] h-[18px] w-[1.25px] rounded-full bg-[var(--border)]' />
+
+            {/* Creator profile pic */}
+            <Skeleton className='h-[16px] w-[16px] rounded-full' />
+            {/* Creator name */}
+            <Skeleton className='h-[21px] w-[100px] rounded-[4px]' />
+          </div>
+
+          {/* Credentials needed */}
+          <div className='mt-[12px]'>
+            <Skeleton className='h-[18px] w-[280px] rounded-[4px]' />
+          </div>
+
+          {/* Canvas preview */}
+          <div className='relative mt-[24px] h-[450px] w-full flex-shrink-0 overflow-hidden rounded-[8px] border border-[var(--border)]'>
+            <Skeleton className='h-full w-full rounded-none' />
+          </div>
+
+          {/* About this Workflow */}
+          <div className='mt-8'>
+            <Skeleton className='mb-4 h-[24px] w-[180px] rounded-[4px]' />
+            <div className='space-y-2'>
+              <Skeleton className='h-[18px] w-full rounded-[4px]' />
+              <Skeleton className='h-[18px] w-[90%] rounded-[4px]' />
+              <Skeleton className='h-[18px] w-[75%] rounded-[4px]' />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface TemplateDetailsProps {
   isWorkspaceContext?: boolean
@@ -52,20 +143,19 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
   const workspaceId = isWorkspaceContext ? (params?.workspaceId as string) : null
   const { data: session } = useSession()
 
-  const [template, setTemplate] = useState<Template | null>(null)
+  const { data: template, isLoading: loading } = useTemplate(templateId)
+  const starTemplate = useStarTemplate()
+
   const [currentUserOrgs, setCurrentUserOrgs] = useState<string[]>([])
   const [currentUserOrgRoles, setCurrentUserOrgRoles] = useState<
     Array<{ organizationId: string; role: string }>
   >([])
   const [isSuperUser, setIsSuperUser] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [isStarred, setIsStarred] = useState(false)
-  const [starCount, setStarCount] = useState(0)
-  const [isStarring, setIsStarring] = useState(false)
   const [isUsing, setIsUsing] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [isApproving, setIsApproving] = useState(false)
   const [isRejecting, setIsRejecting] = useState(false)
+  const [isVerifying, setIsVerifying] = useState(false)
   const [hasWorkspaceAccess, setHasWorkspaceAccess] = useState<boolean | null>(null)
   const [workspaces, setWorkspaces] = useState<
     Array<{ id: string; name: string; permissions: string }>
@@ -76,29 +166,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
   const currentUserId = session?.user?.id || null
 
-  // Fetch template data on client side
   useEffect(() => {
-    if (!templateId) {
-      setLoading(false)
-      return
-    }
-
-    const fetchTemplate = async () => {
-      try {
-        const response = await fetch(`/api/templates/${templateId}`)
-        if (response.ok) {
-          const data = await response.json()
-          setTemplate(data.data)
-          setIsStarred(data.data.isStarred || false)
-          setStarCount(data.data.stars || 0)
-        }
-      } catch (error) {
-        logger.error('Error fetching template:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
     const fetchUserOrganizations = async () => {
       if (!currentUserId) return
 
@@ -134,12 +202,10 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       }
     }
 
-    fetchTemplate()
     fetchSuperUserStatus()
     fetchUserOrganizations()
-  }, [templateId, currentUserId])
+  }, [currentUserId])
 
-  // Fetch workspaces when user is logged in
   useEffect(() => {
     if (!currentUserId) return
 
@@ -149,7 +215,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
         const response = await fetch('/api/workspaces')
         if (response.ok) {
           const data = await response.json()
-          // Filter workspaces where user has write/admin permissions
           const availableWorkspaces = data.workspaces
             .filter((ws: any) => ws.permissions === 'write' || ws.permissions === 'admin')
             .map((ws: any) => ({
@@ -169,7 +234,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
     fetchWorkspaces()
   }, [currentUserId])
 
-  // Clean up URL when returning from login
   useEffect(() => {
     if (template && searchParams?.get('use') === 'true' && currentUserId) {
       if (isWorkspaceContext && workspaceId) {
@@ -181,26 +245,20 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
     }
   }, [searchParams, currentUserId, template, isWorkspaceContext, workspaceId, router])
 
-  // Check if user can edit template
   const canEditTemplate = (() => {
     if (!currentUserId || !template?.creator) return false
 
-    // For user creator profiles: must be the user themselves
     if (template.creator.referenceType === 'user') {
       return template.creator.referenceId === currentUserId
     }
 
-    // For organization creator profiles:
     if (template.creator.referenceType === 'organization' && template.creator.referenceId) {
       const isOrgMember = currentUserOrgs.includes(template.creator.referenceId)
 
-      // If template has a connected workflow, any org member with workspace access can edit
       if (template.workflowId) {
         return isOrgMember
       }
 
-      // If template is orphaned, only admin/owner can edit
-      // We need to check the user's role in the organization
       const orgMembership = currentUserOrgRoles.find(
         (org) => org.organizationId === template.creator?.referenceId
       )
@@ -212,7 +270,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
     return false
   })()
 
-  // Check workspace access for connected workflow
   useEffect(() => {
     const checkWorkspaceAccess = async () => {
       if (!template?.workflowId || !currentUserId || !canEditTemplate) {
@@ -227,7 +284,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
         } else if (checkResponse.ok) {
           setHasWorkspaceAccess(true)
         } else {
-          // Workflow doesn't exist
           setHasWorkspaceAccess(null)
         }
       } catch (error) {
@@ -241,11 +297,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
   if (loading) {
     return (
-      <div className='flex h-screen items-center justify-center'>
-        <div className='text-center'>
-          <p className='font-sans text-muted-foreground text-sm'>Loading template...</p>
-        </div>
-      </div>
+      <TemplateDetailsLoading isWorkspaceContext={isWorkspaceContext} workspaceId={workspaceId} />
     )
   }
 
@@ -301,13 +353,13 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
     }
   }
 
-  const handleBack = () => {
-    if (isWorkspaceContext) {
-      router.back()
-    } else {
-      router.push('/templates')
-    }
-  }
+  const breadcrumbItems = [
+    {
+      label: 'Templates',
+      href: isWorkspaceContext ? `/workspace/${workspaceId}/templates` : '/templates',
+    },
+    { label: template?.name || 'Template' },
+  ]
   /**
    * Intercepts wheel events over the workflow preview so that the page handles scrolling
    * instead of the underlying canvas. We stop propagation in the capture phase to prevent
@@ -319,32 +371,20 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
    * @param event - The wheel event fired when the user scrolls over the preview area.
    */
   const handleCanvasWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
-    // Allow pinch/zoom gestures (e.g., ctrl/cmd + wheel) to continue to the canvas.
     if (event.ctrlKey || event.metaKey) {
       return
     }
 
-    // Prevent React Flow from handling the wheel; let the page scroll naturally.
     event.stopPropagation()
   }
 
   const handleStarToggle = async () => {
-    if (isStarring || !currentUserId) return
+    if (!currentUserId || !template) return
 
-    setIsStarring(true)
-    try {
-      const method = isStarred ? 'DELETE' : 'POST'
-      const response = await fetch(`/api/templates/${template.id}/star`, { method })
-
-      if (response.ok) {
-        setIsStarred(!isStarred)
-        setStarCount((prev) => (isStarred ? prev - 1 : prev + 1))
-      }
-    } catch (error) {
-      logger.error('Error toggling star:', error)
-    } finally {
-      setIsStarring(false)
-    }
+    starTemplate.mutate({
+      templateId: template.id,
+      action: template.isStarred ? 'remove' : 'add',
+    })
   }
 
   const handleUseTemplate = () => {
@@ -357,7 +397,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       return
     }
 
-    // In workspace context, use current workspace directly
     if (isWorkspaceContext && workspaceId) {
       handleWorkspaceSelectForUse(workspaceId)
     }
@@ -366,7 +405,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
   const handleEditTemplate = async () => {
     if (!currentUserId || !template) return
 
-    // In workspace context with existing workflow, navigate directly
     if (isWorkspaceContext && workspaceId && template.workflowId) {
       setIsEditing(true)
       try {
@@ -381,10 +419,8 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       } finally {
         setIsEditing(false)
       }
-      // If workflow doesn't exist, fall through to workspace selector
     }
 
-    // Check if workflow exists and user has access (global context)
     if (template.workflowId && !isWorkspaceContext) {
       setIsEditing(true)
       try {
@@ -410,7 +446,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       }
     }
 
-    // Workflow doesn't exist - show workspace selector or use current workspace
     if (isWorkspaceContext && workspaceId) {
       handleWorkspaceSelectForEdit(workspaceId)
     } else {
@@ -435,7 +470,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
       const { workflowId } = await response.json()
 
-      // Navigate to the new workflow with full page load
       window.location.href = `/workspace/${workspaceId}/w/${workflowId}`
     } catch (error) {
       logger.error('Error using template:', error)
@@ -450,7 +484,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
     setIsUsing(true)
     setShowWorkspaceSelectorForEdit(false)
     try {
-      // Import template as a new workflow and connect it to the template
       const response = await fetch(`/api/templates/${template.id}/use`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -463,7 +496,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
       const { workflowId } = await response.json()
 
-      // Navigate to the new workflow with full page load
       window.location.href = `/workspace/${workspaceId}/w/${workflowId}`
     } catch (error) {
       logger.error('Error importing template for editing:', error)
@@ -482,9 +514,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       })
 
       if (response.ok) {
-        // Update template status optimistically
-        setTemplate({ ...template, status: 'approved' })
-        // Redirect back to templates page after approval
         if (isWorkspaceContext && workspaceId) {
           router.push(`/workspace/${workspaceId}/templates`)
         } else {
@@ -508,9 +537,6 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       })
 
       if (response.ok) {
-        // Update template status optimistically
-        setTemplate({ ...template, status: 'rejected' })
-        // Redirect back to templates page after rejection
         if (isWorkspaceContext && workspaceId) {
           router.push(`/workspace/${workspaceId}/templates`)
         } else {
@@ -521,6 +547,32 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
       logger.error('Error rejecting template:', error)
     } finally {
       setIsRejecting(false)
+    }
+  }
+
+  const handleToggleVerification = async () => {
+    if (isVerifying || !template?.creator?.id) return
+
+    setIsVerifying(true)
+    try {
+      const endpoint = `/api/creators/${template.creator.id}/verify`
+      const method = template.creator.verified ? 'DELETE' : 'POST'
+
+      const response = await fetch(endpoint, { method })
+
+      if (response.ok) {
+        // Refresh page to show updated verification status
+        window.location.reload()
+      } else {
+        const error = await response.json()
+        logger.error('Error toggling verification:', error)
+        alert(`Failed to ${template.creator.verified ? 'unverify' : 'verify'} creator`)
+      }
+    } catch (error) {
+      logger.error('Error toggling verification:', error)
+      alert('An error occurred while toggling verification')
+    } finally {
+      setIsVerifying(false)
     }
   }
 
@@ -576,24 +628,25 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
   }
 
   return (
-    <div className={cn('flex min-h-screen flex-col', isWorkspaceContext && 'pl-64')}>
-      <div className='flex flex-1 overflow-hidden'>
-        <div className='flex flex-1 flex-col overflow-auto px-[24px] pt-[24px] pb-[24px]'>
-          {/* Top bar with back button */}
-          <div className='flex items-center justify-between'>
-            {/* Back button */}
-            <button
-              onClick={handleBack}
-              className='flex items-center gap-[6px] font-medium text-[#ADADAD] text-[14px] transition-colors hover:text-white'
-            >
-              <ArrowLeft className='h-[14px] w-[14px]' />
-              <span>More Templates</span>
-            </button>
-          </div>
+    <div
+      className={cn(
+        'flex flex-col',
+        isWorkspaceContext ? 'h-full flex-1 overflow-hidden' : 'min-h-screen'
+      )}
+    >
+      <div className={cn('flex flex-1', isWorkspaceContext && 'overflow-hidden')}>
+        <div
+          className={cn(
+            'flex flex-1 flex-col px-[24px] pt-[24px] pb-[24px]',
+            isWorkspaceContext ? 'overflow-auto bg-white dark:bg-[var(--bg)]' : 'overflow-visible'
+          )}
+        >
+          {/* Breadcrumb navigation */}
+          <Breadcrumb items={breadcrumbItems} />
 
           {/* Template name and action buttons */}
-          <div className='mt-[24px] flex items-center justify-between'>
-            <h1 className='font-medium text-[18px]'>{template.name}</h1>
+          <div className='mt-[14px] flex items-center justify-between'>
+            <h1 className='font-medium text-[18px] text-[var(--text-primary)]'>{template.name}</h1>
 
             {/* Action buttons */}
             <div className='flex items-center gap-[8px]'>
@@ -679,7 +732,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                 <>
                   {!currentUserId ? (
                     <Button
-                      variant='primary'
+                      variant='tertiary'
                       onClick={() => {
                         const callbackUrl =
                           isWorkspaceContext && workspaceId
@@ -695,7 +748,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                     </Button>
                   ) : isWorkspaceContext ? (
                     <Button
-                      variant='primary'
+                      variant='tertiary'
                       onClick={handleUseTemplate}
                       disabled={isUsing}
                       className='!text-[#FFFFFF] h-[32px] rounded-[6px] px-[12px] text-[14px]'
@@ -740,7 +793,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
           {/* Template tagline */}
           {template.details?.tagline && (
-            <p className='mt-[4px] font-medium text-[#888888] text-[14px]'>
+            <p className='mt-[4px] line-clamp-2 max-w-[40vw] font-medium text-[14px] text-[var(--text-tertiary)]'>
               {template.details.tagline}
             </p>
           )}
@@ -752,18 +805,22 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
               onClick={handleStarToggle}
               className={cn(
                 'h-[14px] w-[14px] cursor-pointer transition-colors',
-                isStarred ? 'fill-yellow-500 text-yellow-500' : 'text-[#888888]',
-                isStarring && 'opacity-50'
+                template.isStarred ? 'fill-yellow-500 text-yellow-500' : 'text-[var(--text-muted)]',
+                starTemplate.isPending && 'opacity-50'
               )}
             />
-            <span className='font-medium text-[#888888] text-[14px]'>{starCount}</span>
+            <span className='font-medium text-[14px] text-[var(--text-muted)]'>
+              {template.stars || 0}
+            </span>
 
             {/* Users icon and count */}
-            <ChartNoAxesColumn className='h-[16px] w-[16px] text-[#888888]' />
-            <span className='font-medium text-[#888888] text-[14px]'>{template.views}</span>
+            <ChartNoAxesColumn className='h-[16px] w-[16px] text-[var(--text-muted)]' />
+            <span className='font-medium text-[14px] text-[var(--text-muted)]'>
+              {template.views}
+            </span>
 
             {/* Vertical divider */}
-            <div className='mx-[4px] mb-[-1.5px] h-[18px] w-[1.25px] rounded-full bg-[#3A3A3A]' />
+            <div className='mx-[4px] mb-[-1.5px] h-[18px] w-[1.25px] rounded-full bg-[var(--border)]' />
 
             {/* Creator profile pic */}
             {template.creator?.profileImageUrl ? (
@@ -775,20 +832,23 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                 />
               </div>
             ) : (
-              <div className='flex h-[16px] w-[16px] flex-shrink-0 items-center justify-center rounded-full bg-[#4A4A4A]'>
-                <User className='h-[14px] w-[14px] text-[#888888]' />
+              <div className='flex h-[16px] w-[16px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)]'>
+                <User className='h-[14px] w-[14px] text-[var(--text-muted)]' />
               </div>
             )}
             {/* Creator name */}
-            <span className='font-medium text-[#8B8B8B] text-[14px]'>
-              {template.creator?.name || 'Unknown'}
-            </span>
+            <div className='flex items-center gap-[4px]'>
+              <span className='font-medium text-[14px] text-[var(--text-muted)]'>
+                {template.creator?.name || 'Unknown'}
+              </span>
+              {template.creator?.verified && <VerifiedBadge size='md' />}
+            </div>
           </div>
 
           {/* Credentials needed */}
           {Array.isArray(template.requiredCredentials) &&
             template.requiredCredentials.length > 0 && (
-              <p className='mt-[12px] font-medium text-[#888888] text-[12px]'>
+              <p className='mt-[12px] font-medium text-[12px] text-[var(--text-muted)]'>
                 Credentials needed:{' '}
                 {template.requiredCredentials
                   .map((cred: CredentialRequirement) => {
@@ -806,7 +866,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
 
           {/* Canvas preview */}
           <div
-            className='relative mt-[24px] h-[450px] w-full overflow-hidden rounded-[8px] border border-[var(--border)]'
+            className='relative mt-[24px] h-[450px] w-full flex-shrink-0 overflow-hidden rounded-[8px] border border-[var(--border)]'
             onWheelCapture={handleCanvasWheelCapture}
           >
             {renderWorkflowPreview()}
@@ -814,7 +874,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
             {/* Last updated overlay */}
             {template.updatedAt && (
               <div className='pointer-events-none absolute right-[12px] bottom-[12px] rounded-[4px] bg-[var(--bg)]/80 px-[8px] py-[4px] backdrop-blur-sm'>
-                <span className='font-medium text-[#8B8B8B] text-[12px]'>
+                <span className='font-medium text-[12px] text-[var(--text-muted)]'>
                   Last updated{' '}
                   {formatDistanceToNow(new Date(template.updatedAt), {
                     addSuffix: true,
@@ -911,9 +971,25 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
               template.creator.details?.websiteUrl ||
               template.creator.details?.contactEmail) && (
               <div className='mt-8'>
-                <h3 className='mb-4 font-sans font-semibold text-base text-foreground'>
-                  About the Creator
-                </h3>
+                <div className='mb-4 flex items-center justify-between'>
+                  <h3 className='font-sans font-semibold text-base text-foreground'>
+                    About the Creator
+                  </h3>
+                  {isSuperUser && template.creator && (
+                    <Button
+                      variant={template.creator.verified ? 'active' : 'default'}
+                      onClick={handleToggleVerification}
+                      disabled={isVerifying}
+                      className='h-[28px] rounded-[6px] text-[12px]'
+                    >
+                      {isVerifying
+                        ? 'Updating...'
+                        : template.creator.verified
+                          ? 'Unverify Creator'
+                          : 'Verify Creator'}
+                    </Button>
+                  )}
+                </div>
                 <div className='flex items-start gap-4'>
                   {/* Creator profile image */}
                   {template.creator.profileImageUrl ? (
@@ -925,17 +1001,20 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                       />
                     </div>
                   ) : (
-                    <div className='flex h-[48px] w-[48px] flex-shrink-0 items-center justify-center rounded-full bg-[#4A4A4A]'>
-                      <User className='h-[24px] w-[24px] text-[#888888]' />
+                    <div className='flex h-[48px] w-[48px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)]'>
+                      <User className='h-[24px] w-[24px] text-[var(--text-muted)]' />
                     </div>
                   )}
 
                   {/* Creator details */}
                   <div className='flex-1'>
                     <div className='mb-[5px] flex items-center gap-3'>
-                      <h4 className='font-sans font-semibold text-base text-foreground'>
-                        {template.creator.name}
-                      </h4>
+                      <div className='flex items-center gap-[6px]'>
+                        <h4 className='font-sans font-semibold text-base text-foreground'>
+                          {template.creator.name}
+                        </h4>
+                        {template.creator.verified && <VerifiedBadge size='md' />}
+                      </div>
 
                       {/* Social links */}
                       <div className='flex items-center gap-[12px]'>
@@ -944,7 +1023,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                             href={template.creator.details.websiteUrl}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='flex items-center text-[#888888] transition-colors hover:text-[var(--text-primary)]'
+                            className='flex items-center text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]'
                             aria-label='Website'
                           >
                             <Globe className='h-[14px] w-[14px]' />
@@ -955,7 +1034,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                             href={template.creator.details.xUrl}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='flex items-center text-[#888888] transition-colors hover:text-[var(--text-primary)]'
+                            className='flex items-center text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]'
                             aria-label='X (Twitter)'
                           >
                             <svg
@@ -972,7 +1051,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                             href={template.creator.details.linkedinUrl}
                             target='_blank'
                             rel='noopener noreferrer'
-                            className='flex items-center text-[#888888] transition-colors hover:text-[var(--text-primary)]'
+                            className='flex items-center text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]'
                             aria-label='LinkedIn'
                           >
                             <Linkedin className='h-[14px] w-[14px]' />
@@ -981,7 +1060,7 @@ export default function TemplateDetails({ isWorkspaceContext = false }: Template
                         {template.creator.details?.contactEmail && (
                           <a
                             href={`mailto:${template.creator.details.contactEmail}`}
-                            className='flex items-center text-[#888888] transition-colors hover:text-[var(--text-primary)]'
+                            className='flex items-center text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]'
                             aria-label='Email'
                           >
                             <Mail className='h-[14px] w-[14px]' />

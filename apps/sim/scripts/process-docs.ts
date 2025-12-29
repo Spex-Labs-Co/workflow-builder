@@ -3,10 +3,10 @@
 import path from 'path'
 import { db } from '@sim/db'
 import { docsEmbeddings } from '@sim/db/schema'
+import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
 import { type DocChunk, DocsChunker } from '@/lib/chunkers'
-import { isDev } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
+import { isDev } from '@/lib/core/config/feature-flags'
 
 const logger = createLogger('ProcessDocs')
 
@@ -19,10 +19,10 @@ interface ProcessingOptions {
   baseUrl?: string
   /** Chunk size in tokens */
   chunkSize?: number
-  /** Minimum chunk size */
-  minChunkSize?: number
-  /** Overlap between chunks */
-  overlap?: number
+  /** Minimum chunk size in characters */
+  minCharactersPerChunk?: number
+  /** Overlap between chunks in tokens */
+  chunkOverlap?: number
   /** Dry run - only display results, don't save to DB */
   dryRun?: boolean
   /** Verbose output */
@@ -34,11 +34,11 @@ interface ProcessingOptions {
  */
 async function processDocs(options: ProcessingOptions = {}) {
   const config = {
-    docsPath: options.docsPath || path.join(process.cwd(), '../../apps/docs/content/docs'),
+    docsPath: options.docsPath || path.join(process.cwd(), '../../apps/docs/content/docs/en'),
     baseUrl: options.baseUrl || (isDev ? 'http://localhost:4000' : 'https://docs.sim.ai'),
     chunkSize: options.chunkSize || 1024,
-    minChunkSize: options.minChunkSize || 100,
-    overlap: options.overlap || 200,
+    minCharactersPerChunk: options.minCharactersPerChunk || 100,
+    chunkOverlap: options.chunkOverlap || 200,
     clearExisting: options.clearExisting ?? false,
     dryRun: options.dryRun ?? false,
     verbose: options.verbose ?? false,
@@ -59,8 +59,8 @@ async function processDocs(options: ProcessingOptions = {}) {
     // Initialize the chunker
     const chunker = new DocsChunker({
       chunkSize: config.chunkSize,
-      minChunkSize: config.minChunkSize,
-      overlap: config.overlap,
+      minCharactersPerChunk: config.minCharactersPerChunk,
+      chunkOverlap: config.chunkOverlap,
       baseUrl: config.baseUrl,
     })
 
@@ -216,24 +216,30 @@ async function main() {
 
 Usage: bun run process-docs.ts [options]
 
+By default, processes English (en) documentation only.
+Note: Use --clear flag when changing language scope to remove old embeddings.
+
 Options:
   --clear          Clear existing embeddings before processing
   --dry-run        Process and display results without saving to DB
   --verbose        Show detailed output including text previews
-  --path <path>    Custom path to docs directory
+  --path <path>    Custom path to docs directory (default: docs/en)
   --url <url>      Custom base URL for links
   --chunk-size <n> Custom chunk size in tokens (default: 1024)
   --help, -h       Show this help message
 
 Examples:
-  # Dry run to test chunking
+  # Dry run to test chunking (English docs)
   bun run process-docs.ts --dry-run
 
-  # Process and save to database
+  # Process and save to database (English docs)
   bun run process-docs.ts
 
-  # Clear existing and reprocess
+  # Clear existing and reprocess (English docs)
   bun run process-docs.ts --clear
+
+  # Process a different language
+  bun run process-docs.ts --path ../../apps/docs/content/docs/es
 
   # Custom path with verbose output
   bun run process-docs.ts --path ./my-docs --verbose

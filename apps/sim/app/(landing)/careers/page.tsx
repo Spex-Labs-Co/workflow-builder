@@ -1,7 +1,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { createLogger } from '@sim/logger'
+import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,13 +14,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { quickValidateEmail } from '@/lib/email/validation'
-import { isHosted } from '@/lib/environment'
-import { createLogger } from '@/lib/logs/console/logger'
-import { cn } from '@/lib/utils'
+import { isHosted } from '@/lib/core/config/feature-flags'
+import { cn } from '@/lib/core/utils/cn'
+import { quickValidateEmail } from '@/lib/messaging/email/validation'
+import { soehne } from '@/app/_styles/fonts/soehne/soehne'
 import Footer from '@/app/(landing)/components/footer/footer'
 import Nav from '@/app/(landing)/components/nav/nav'
-import { soehne } from '@/app/fonts/soehne/soehne'
 
 const logger = createLogger('CareersPage')
 
@@ -499,16 +499,11 @@ export default function CareersPage() {
                   className='min-w-[200px] rounded-[10px] border border-[#6F3DFA] bg-gradient-to-b from-[#8357FF] to-[#6F3DFA] text-white shadow-[inset_0_2px_4px_0_#9B77FF] transition-all duration-300 hover:opacity-90 disabled:opacity-50'
                   size='lg'
                 >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                      Submitting...
-                    </>
-                  ) : submitStatus === 'success' ? (
-                    'Submitted'
-                  ) : (
-                    'Submit Application'
-                  )}
+                  {isSubmitting
+                    ? 'Submitting...'
+                    : submitStatus === 'success'
+                      ? 'Submitted'
+                      : 'Submit Application'}
                 </Button>
               </div>
             </form>

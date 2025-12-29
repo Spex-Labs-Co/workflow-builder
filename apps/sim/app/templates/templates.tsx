@@ -1,15 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { createLogger } from '@sim/logger'
 import { Layout, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/emcn'
 import { Input } from '@/components/ui/input'
-import { createLogger } from '@/lib/logs/console/logger'
-import type { CredentialRequirement } from '@/lib/workflows/credential-extractor'
+import type { CredentialRequirement } from '@/lib/workflows/credentials/credential-extractor'
+import type { CreatorProfileDetails } from '@/app/_types/creator-profile'
 import { TemplateCard, TemplateCardSkeleton } from '@/app/templates/components/template-card'
+import { useDebounce } from '@/hooks/use-debounce'
 import type { WorkflowState } from '@/stores/workflows/workflow/types'
-import type { CreatorProfileDetails } from '@/types/creator-profile'
 
 const logger = createLogger('TemplatesPage')
 
@@ -29,6 +30,7 @@ export interface Template {
     details?: CreatorProfileDetails | null
     referenceType: 'user' | 'organization'
     referenceId: string
+    verified?: boolean
   } | null
   views: number
   stars: number
@@ -55,11 +57,11 @@ export default function Templates({
 }: TemplatesProps) {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [activeTab, setActiveTab] = useState('gallery')
   const [templates, setTemplates] = useState<Template[]>(initialTemplates)
   const [loading, setLoading] = useState(false)
 
-  // Redirect authenticated users to workspace templates
   useEffect(() => {
     if (currentUserId) {
       const redirectToWorkspace = async () => {
@@ -81,31 +83,18 @@ export default function Templates({
   }, [currentUserId, router])
 
   /**
-   * Update star status for a template
-   */
-  const handleStarChange = (templateId: string, isStarred: boolean, newStarCount: number) => {
-    setTemplates((prevTemplates) =>
-      prevTemplates.map((template) =>
-        template.id === templateId ? { ...template, isStarred, stars: newStarCount } : template
-      )
-    )
-  }
-
-  /**
    * Filter templates based on active tab and search query
    * Memoized to prevent unnecessary recalculations on render
    */
   const filteredTemplates = useMemo(() => {
-    const query = searchQuery.toLowerCase()
+    const query = debouncedSearchQuery.toLowerCase()
 
     return templates.filter((template) => {
-      // Filter by tab - only gallery and pending for public page
       const tabMatch =
         activeTab === 'gallery' ? template.status === 'approved' : template.status === 'pending'
 
       if (!tabMatch) return false
 
-      // Filter by search query
       if (!query) return true
 
       const searchableText = [template.name, template.details?.tagline, template.creator?.name]
@@ -115,14 +104,14 @@ export default function Templates({
 
       return searchableText.includes(query)
     })
-  }, [templates, activeTab, searchQuery])
+  }, [templates, activeTab, debouncedSearchQuery])
 
   /**
    * Get empty state message based on current filters
    * Memoized to prevent unnecessary recalculations on render
    */
   const emptyState = useMemo(() => {
-    if (searchQuery) {
+    if (debouncedSearchQuery) {
       return {
         title: 'No templates found',
         description: 'Try a different search term',
@@ -141,26 +130,26 @@ export default function Templates({
     }
 
     return messages[activeTab as keyof typeof messages] || messages.gallery
-  }, [searchQuery, activeTab])
+  }, [debouncedSearchQuery, activeTab])
 
   return (
     <div className='flex h-[100vh] flex-col'>
       <div className='flex flex-1 overflow-hidden'>
-        <div className='flex flex-1 flex-col overflow-auto px-[24px] pt-[24px] pb-[24px]'>
+        <div className='flex flex-1 flex-col overflow-auto px-[24px] pt-[28px] pb-[24px]'>
           <div>
             <div className='flex items-start gap-[12px]'>
-              <div className='flex h-[26px] w-[26px] items-center justify-center rounded-[6px] border border-[#7A5F11] bg-[#514215]'>
-                <Layout className='h-[14px] w-[14px] text-[#FBBC04]' />
+              <div className='flex h-[26px] w-[26px] items-center justify-center rounded-[6px] border border-[#1E3A5A] bg-[#0F2A3D]'>
+                <Layout className='h-[14px] w-[14px] text-[#60A5FA]' />
               </div>
               <h1 className='font-medium text-[18px]'>Templates</h1>
             </div>
-            <p className='mt-[10px] font-base text-[#888888] text-[14px]'>
+            <p className='mt-[10px] text-[14px] text-[var(--text-tertiary)]'>
               Grab a template and start building, or make one from scratch.
             </p>
           </div>
 
           <div className='mt-[14px] flex items-center justify-between'>
-            <div className='flex h-[32px] w-[400px] items-center gap-[6px] rounded-[8px] bg-[var(--surface-5)] px-[8px]'>
+            <div className='flex h-[32px] w-[400px] items-center gap-[6px] rounded-[8px] bg-[var(--surface-4)] px-[8px]'>
               <Search className='h-[14px] w-[14px] text-[var(--text-subtle)]' />
               <Input
                 placeholder='Search'
@@ -189,15 +178,13 @@ export default function Templates({
             </div>
           </div>
 
-          <div className='mt-[24px] h-[1px] w-full border-[var(--border)] border-t' />
-
           <div className='mt-[24px] grid grid-cols-1 gap-x-[20px] gap-y-[40px] md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
             {loading ? (
               Array.from({ length: 8 }).map((_, index) => (
                 <TemplateCardSkeleton key={`skeleton-${index}`} />
               ))
             ) : filteredTemplates.length === 0 ? (
-              <div className='col-span-full flex h-64 items-center justify-center rounded-lg border border-muted-foreground/25 border-dashed bg-muted/20'>
+              <div className='col-span-full flex h-64 items-center justify-center rounded-lg border border-muted-foreground/25 bg-muted/20'>
                 <div className='text-center'>
                   <p className='font-medium text-muted-foreground text-sm'>{emptyState.title}</p>
                   <p className='mt-1 text-muted-foreground/70 text-xs'>{emptyState.description}</p>
@@ -209,15 +196,13 @@ export default function Templates({
                   key={template.id}
                   id={template.id}
                   title={template.name}
-                  description={template.details?.tagline || ''}
                   author={template.creator?.name || 'Unknown'}
                   authorImageUrl={template.creator?.profileImageUrl || null}
                   usageCount={template.views.toString()}
                   stars={template.stars}
                   state={template.state}
                   isStarred={template.isStarred}
-                  onStarChange={handleStarChange}
-                  isAuthenticated={!!currentUserId}
+                  isVerified={template.creator?.verified || false}
                 />
               ))
             )}

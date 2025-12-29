@@ -1,3 +1,4 @@
+import { createMockFetch, loggerMock } from '@sim/testing'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolConfig } from '@/tools/types'
 import {
@@ -10,14 +11,7 @@ import {
   validateRequiredParametersAfterMerge,
 } from '@/tools/utils'
 
-vi.mock('@/lib/logs/console/logger', () => ({
-  createLogger: vi.fn().mockReturnValue({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}))
+vi.mock('@sim/logger', () => loggerMock)
 
 vi.mock('@/stores/settings/environment/store', () => {
   const mockStore = {
@@ -232,7 +226,7 @@ describe('validateRequiredParametersAfterMerge', () => {
         required1: 'value',
         // required2 is missing
       })
-    }).toThrow('"Required2" is required for Test Tool')
+    }).toThrow('Required2 is required for Test Tool')
   })
 
   it.concurrent('should not throw error when all required parameters are provided', () => {
@@ -260,7 +254,7 @@ describe('validateRequiredParametersAfterMerge', () => {
         required1: null,
         required2: '',
       })
-    }).toThrow('"Required1" is required for Test Tool')
+    }).toThrow('Required1 is required for Test Tool')
   })
 
   it.concurrent(
@@ -317,7 +311,7 @@ describe('validateRequiredParametersAfterMerge', () => {
         // userOrLlmParam missing - should cause error
         // userOnlyParam missing - should NOT cause error (validated earlier)
       })
-    }).toThrow('"User Or Llm Param" is required for')
+    }).toThrow('User Or Llm Param is required for')
   })
 
   it.concurrent('should use parameter description in error messages when available', () => {
@@ -335,7 +329,7 @@ describe('validateRequiredParametersAfterMerge', () => {
 
     expect(() => {
       validateRequiredParametersAfterMerge('test-tool', toolWithDescriptions, {})
-    }).toThrow('"Subreddit" is required for Test Tool')
+    }).toThrow('Subreddit is required for Test Tool')
   })
 
   it.concurrent('should fall back to parameter name when no description available', () => {
@@ -353,7 +347,7 @@ describe('validateRequiredParametersAfterMerge', () => {
 
     expect(() => {
       validateRequiredParametersAfterMerge('test-tool', toolWithoutDescription, {})
-    }).toThrow('"Subreddit" is required for Test Tool')
+    }).toThrow('Subreddit is required for Test Tool')
   })
 
   it.concurrent('should handle undefined values as missing', () => {
@@ -362,7 +356,7 @@ describe('validateRequiredParametersAfterMerge', () => {
         required1: 'value',
         required2: undefined, // Explicitly undefined
       })
-    }).toThrow('"Required2" is required for Test Tool')
+    }).toThrow('Required2 is required for Test Tool')
   })
 
   it.concurrent('should validate all missing parameters at once', () => {
@@ -387,16 +381,16 @@ describe('validateRequiredParametersAfterMerge', () => {
     // Should throw for the first missing parameter it encounters
     expect(() => {
       validateRequiredParametersAfterMerge('test-tool', toolWithMultipleRequired, {})
-    }).toThrow('"Param1" is required for Test Tool')
+    }).toThrow('Param1 is required for Test Tool')
   })
 })
 
 describe('executeRequest', () => {
   let mockTool: ToolConfig
-  let mockFetch: any
+  let mockFetch: ReturnType<typeof createMockFetch>
 
   beforeEach(() => {
-    mockFetch = vi.fn()
+    mockFetch = createMockFetch({ json: { result: 'success' }, status: 200 })
     global.fetch = mockFetch
 
     mockTool = {
@@ -422,12 +416,6 @@ describe('executeRequest', () => {
   })
 
   it('should handle successful requests', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ result: 'success' }),
-    })
-
     const result = await executeRequest('test-tool', mockTool, {
       url: 'https://api.example.com',
       method: 'GET',
@@ -448,12 +436,8 @@ describe('executeRequest', () => {
 
   it.concurrent('should use default transform response if not provided', async () => {
     mockTool.transformResponse = undefined
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ result: 'success' }),
-    })
+    const localMockFetch = createMockFetch({ json: { result: 'success' }, status: 200 })
+    global.fetch = localMockFetch
 
     const result = await executeRequest('test-tool', mockTool, {
       url: 'https://api.example.com',
@@ -468,12 +452,13 @@ describe('executeRequest', () => {
   })
 
   it('should handle error responses', async () => {
-    mockFetch.mockResolvedValueOnce({
+    const errorFetch = createMockFetch({
       ok: false,
       status: 400,
       statusText: 'Bad Request',
-      json: async () => ({ message: 'Invalid input' }),
+      json: { message: 'Invalid input' },
     })
+    global.fetch = errorFetch
 
     const result = await executeRequest('test-tool', mockTool, {
       url: 'https://api.example.com',
@@ -489,8 +474,8 @@ describe('executeRequest', () => {
   })
 
   it.concurrent('should handle network errors', async () => {
-    const networkError = new Error('Network error')
-    mockFetch.mockRejectedValueOnce(networkError)
+    const errorFetch = vi.fn().mockRejectedValueOnce(new Error('Network error'))
+    global.fetch = errorFetch
 
     const result = await executeRequest('test-tool', mockTool, {
       url: 'https://api.example.com',
@@ -506,7 +491,7 @@ describe('executeRequest', () => {
   })
 
   it('should handle JSON parse errors in error response', async () => {
-    mockFetch.mockResolvedValueOnce({
+    const errorFetch = vi.fn().mockResolvedValueOnce({
       ok: false,
       status: 500,
       statusText: 'Server Error',
@@ -514,6 +499,7 @@ describe('executeRequest', () => {
         throw new Error('Invalid JSON')
       },
     })
+    global.fetch = errorFetch
 
     const result = await executeRequest('test-tool', mockTool, {
       url: 'https://api.example.com',
@@ -524,7 +510,7 @@ describe('executeRequest', () => {
     expect(result).toEqual({
       success: false,
       output: {},
-      error: 'Server Error', // Should use statusText in the error message
+      error: 'Server Error',
     })
   })
 
@@ -543,12 +529,11 @@ describe('executeRequest', () => {
       },
     }
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
+    const xmlFetch = createMockFetch({
       status: 200,
-      statusText: 'OK',
-      text: async () => '<xml><test>Mock XML response</test></xml>',
+      text: '<xml><test>Mock XML response</test></xml>',
     })
+    global.fetch = xmlFetch
 
     const result = await executeRequest('test-tool', toolWithTransform, {
       url: 'https://api.example.com',

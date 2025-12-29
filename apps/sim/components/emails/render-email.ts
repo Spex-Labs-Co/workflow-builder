@@ -9,8 +9,10 @@ import {
   ResetPasswordEmail,
   UsageThresholdEmail,
 } from '@/components/emails'
+import CreditPurchaseEmail from '@/components/emails/billing/credit-purchase-email'
+import FreeTierUpgradeEmail from '@/components/emails/billing/free-tier-upgrade-email'
 import { getBrandConfig } from '@/lib/branding/branding'
-import { getBaseUrl } from '@/lib/urls/utils'
+import { getBaseUrl } from '@/lib/core/utils/urls'
 
 export async function renderOTPEmail(
   otp: string,
@@ -124,6 +126,25 @@ export async function renderUsageThresholdEmail(params: {
   )
 }
 
+export async function renderFreeTierUpgradeEmail(params: {
+  userName?: string
+  percentUsed: number
+  currentUsage: number
+  limit: number
+  upgradeLink: string
+}): Promise<string> {
+  return await render(
+    FreeTierUpgradeEmail({
+      userName: params.userName,
+      percentUsed: params.percentUsed,
+      currentUsage: params.currentUsage,
+      limit: params.limit,
+      upgradeLink: params.upgradeLink,
+      updatedDate: new Date(),
+    })
+  )
+}
+
 export function getEmailSubject(
   type:
     | 'sign-in'
@@ -135,8 +156,10 @@ export function getEmailSubject(
     | 'help-confirmation'
     | 'enterprise-subscription'
     | 'usage-threshold'
+    | 'free-tier-upgrade'
     | 'plan-welcome-pro'
     | 'plan-welcome-team'
+    | 'credit-purchase'
 ): string {
   const brandName = getBrandConfig().name
 
@@ -159,10 +182,14 @@ export function getEmailSubject(
       return `Your Enterprise Plan is now active on ${brandName}`
     case 'usage-threshold':
       return `You're nearing your monthly budget on ${brandName}`
+    case 'free-tier-upgrade':
+      return `You're at 90% of your free credits on ${brandName}`
     case 'plan-welcome-pro':
       return `Your Pro plan is now active on ${brandName}`
     case 'plan-welcome-team':
       return `Your Team plan is now active on ${brandName}`
+    case 'credit-purchase':
+      return `Credits added to your ${brandName} account`
     default:
       return brandName
   }
@@ -179,6 +206,21 @@ export async function renderPlanWelcomeEmail(params: {
       userName: params.userName,
       loginLink: params.loginLink,
       createdDate: new Date(),
+    })
+  )
+}
+
+export async function renderCreditPurchaseEmail(params: {
+  userName?: string
+  amount: number
+  newBalance: number
+}): Promise<string> {
+  return await render(
+    CreditPurchaseEmail({
+      userName: params.userName,
+      amount: params.amount,
+      newBalance: params.newBalance,
+      purchaseDate: new Date(),
     })
   )
 }

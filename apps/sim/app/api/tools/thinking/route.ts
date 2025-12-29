@@ -1,6 +1,6 @@
+import { createLogger } from '@sim/logger'
 import { type NextRequest, NextResponse } from 'next/server'
-import { createLogger } from '@/lib/logs/console/logger'
-import { generateRequestId } from '@/lib/utils'
+import { generateRequestId } from '@/lib/core/utils/request'
 import type { ThinkingToolParams, ThinkingToolResponse } from '@/tools/thinking/types'
 
 const logger = createLogger('ThinkingToolAPI')

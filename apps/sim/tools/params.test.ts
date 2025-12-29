@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createExecutionToolSchema,
   createLLMToolSchema,
+  createUserToolSchema,
   filterSchemaForLLM,
   formatParameterLabel,
   getToolParametersConfig,
@@ -82,13 +83,13 @@ describe('Tool Parameters Utils', () => {
   })
 
   describe('createLLMToolSchema', () => {
-    it.concurrent('should create schema excluding user-provided parameters', () => {
+    it.concurrent('should create schema excluding user-provided parameters', async () => {
       const userProvidedParams = {
         apiKey: 'user-provided-key',
         channel: '#general',
       }
 
-      const schema = createLLMToolSchema(mockToolConfig, userProvidedParams)
+      const schema = await createLLMToolSchema(mockToolConfig, userProvidedParams)
 
       expect(schema.properties).not.toHaveProperty('apiKey') // user-only, excluded
       expect(schema.properties).not.toHaveProperty('channel') // user-provided, excluded
@@ -98,8 +99,8 @@ describe('Tool Parameters Utils', () => {
       expect(schema.required).not.toContain('apiKey') // user-only, never required for LLM
     })
 
-    it.concurrent('should include all parameters when none are user-provided', () => {
-      const schema = createLLMToolSchema(mockToolConfig, {})
+    it.concurrent('should include all parameters when none are user-provided', async () => {
+      const schema = await createLLMToolSchema(mockToolConfig, {})
 
       expect(schema.properties).not.toHaveProperty('apiKey') // user-only, never shown to LLM
       expect(schema.properties).toHaveProperty('message') // user-or-llm, shown to LLM
@@ -107,6 +108,38 @@ describe('Tool Parameters Utils', () => {
       expect(schema.properties).not.toHaveProperty('timeout') // user-only, never shown to LLM
       expect(schema.required).not.toContain('apiKey') // user-only, never required for LLM
       expect(schema.required).toContain('message') // user-or-llm + required: true
+    })
+  })
+
+  describe('createUserToolSchema', () => {
+    it.concurrent('should include user-only parameters and omit hidden ones', () => {
+      const toolWithHiddenParam = {
+        ...mockToolConfig,
+        id: 'user_schema_tool',
+        params: {
+          ...mockToolConfig.params,
+          spreadsheetId: {
+            type: 'string',
+            required: true,
+            visibility: 'user-only' as ParameterVisibility,
+            description: 'Spreadsheet ID to operate on',
+          },
+          accessToken: {
+            type: 'string',
+            required: true,
+            visibility: 'hidden' as ParameterVisibility,
+            description: 'OAuth access token',
+          },
+        },
+      }
+
+      const schema = createUserToolSchema(toolWithHiddenParam)
+
+      expect(schema.properties).toHaveProperty('spreadsheetId')
+      expect(schema.required).toContain('spreadsheetId')
+      expect(schema.properties).not.toHaveProperty('accessToken')
+      expect(schema.required).not.toContain('accessToken')
+      expect(schema.properties).toHaveProperty('message')
     })
   })
 
@@ -143,6 +176,44 @@ describe('Tool Parameters Utils', () => {
       expect(merged.channel).toBe('#general')
       expect(merged.message).toBe('Hello world')
       expect(merged.timeout).toBe(10000)
+    })
+
+    it.concurrent('should skip empty strings so LLM values are used', () => {
+      const userProvided = {
+        apiKey: 'user-key',
+        channel: '', // User cleared this field
+        message: '', // User cleared this field too
+      }
+      const llmGenerated = {
+        message: 'Hello world',
+        channel: '#random',
+        timeout: 10000,
+      }
+
+      const merged = mergeToolParameters(userProvided, llmGenerated)
+
+      expect(merged.apiKey).toBe('user-key') // Non-empty user value preserved
+      expect(merged.channel).toBe('#random') // LLM value used because user value was empty
+      expect(merged.message).toBe('Hello world') // LLM value used because user value was empty
+      expect(merged.timeout).toBe(10000)
+    })
+
+    it.concurrent('should skip null and undefined values', () => {
+      const userProvided = {
+        apiKey: 'user-key',
+        channel: null,
+        message: undefined,
+      }
+      const llmGenerated = {
+        message: 'Hello world',
+        channel: '#random',
+      }
+
+      const merged = mergeToolParameters(userProvided, llmGenerated)
+
+      expect(merged.apiKey).toBe('user-key')
+      expect(merged.channel).toBe('#random') // LLM value used
+      expect(merged.message).toBe('Hello world') // LLM value used
     })
   })
 
@@ -226,8 +297,8 @@ describe('Tool Parameters Utils', () => {
   })
 
   describe('Type Interface Validation', () => {
-    it.concurrent('should have properly typed ToolSchema', () => {
-      const schema: ToolSchema = createLLMToolSchema(mockToolConfig, {})
+    it.concurrent('should have properly typed ToolSchema', async () => {
+      const schema: ToolSchema = await createLLMToolSchema(mockToolConfig, {})
 
       expect(schema.type).toBe('object')
       expect(typeof schema.properties).toBe('object')

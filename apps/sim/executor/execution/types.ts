@@ -1,3 +1,4 @@
+import type { ExecutionMetadata, SerializableExecutionState } from '@/executor/execution/snapshot'
 import type { BlockState, NormalizedBlockOutput } from '@/executor/types'
 import type { SubflowType } from '@/stores/workflows/workflow/types'
 
@@ -19,7 +20,13 @@ export interface ContextExtensions {
     targetHandle?: string
   }>
   dagIncomingEdges?: Record<string, string[]>
-  snapshotState?: import('@/executor/execution/snapshot').SerializableExecutionState
+  snapshotState?: SerializableExecutionState
+  metadata?: ExecutionMetadata
+  /**
+   * AbortSignal for cancellation support.
+   * When aborted, the execution should stop gracefully.
+   */
+  abortSignal?: AbortSignal
   onStream?: (streamingExecution: unknown) => Promise<void>
   onBlockStart?: (
     blockId: string,
