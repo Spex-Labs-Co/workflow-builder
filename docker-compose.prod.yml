@@ -20,6 +20,9 @@ services:
       - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
       - SOCKET_SERVER_URL=${SOCKET_SERVER_URL:-https://realtime.spexlabs.co}
       - NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL:-https://realtime.spexlabs.co}
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-PbV5OgXzuEPBGyUW0JlIjA}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-jmB5t00FsE2ckbroAE1KRKmPcfCruQ}
+
     depends_on:
       db:
         condition: service_healthy
