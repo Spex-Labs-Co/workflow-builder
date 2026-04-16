@@ -34,7 +34,7 @@ import {
   useDeployWorkflow,
   useUndeployWorkflow,
 } from '@/hooks/queries/deployments'
-// import { useTemplateByWorkflow } from '@/hooks/queries/templates'
+import { useTemplateByWorkflow } from '@/hooks/queries/templates'
 import { useWorkflowMcpServers } from '@/hooks/queries/workflow-mcp-servers'
 import { useWorkflowMap } from '@/hooks/queries/workflows'
 import { useWorkspaceSettings } from '@/hooks/queries/workspace'
@@ -49,8 +49,7 @@ import { ChatDeploy, type ExistingChat } from './components/chat/chat'
 import { ApiInfoModal } from './components/general/components/api-info-modal'
 import { GeneralDeploy } from './components/general/general'
 import { McpDeploy } from './components/mcp/mcp'
-
-// import { TemplateDeploy } from './components/template/template'
+import { TemplateDeploy } from './components/template/template'
 
 const logger = createLogger('DeployModal')
 
@@ -74,7 +73,7 @@ interface WorkflowDeploymentInfoUI {
   isPublicApi: boolean
 }
 
-type TabView = 'general' | 'api' | 'chat' | /* 'template' | */ 'mcp' | 'form' | 'a2a'
+type TabView = 'general' | 'api' | 'chat' | 'template' | 'mcp' | 'form' | 'a2a'
 
 export function DeployModal({
   open,
@@ -101,8 +100,8 @@ export function DeployModal({
   const [selectedStreamingOutputs, setSelectedStreamingOutputs] = useState<string[]>([])
 
   const [showUndeployConfirm, setShowUndeployConfirm] = useState(false)
-  // const [templateFormValid, setTemplateFormValid] = useState(false)
-  // const [templateSubmitting, setTemplateSubmitting] = useState(false)
+  const [templateFormValid, setTemplateFormValid] = useState(false)
+  const [templateSubmitting, setTemplateSubmitting] = useState(false)
   const [mcpToolSubmitting, setMcpToolSubmitting] = useState(false)
   const [mcpToolCanSave, setMcpToolCanSave] = useState(false)
   const [a2aSubmitting, setA2aSubmitting] = useState(false)
@@ -158,17 +157,10 @@ export function DeployModal({
   const hasA2aAgent = !!existingA2aAgent
   const isA2aPublished = existingA2aAgent?.isPublished ?? false
 
-  // const { data: existingTemplate } = useTemplateByWorkflow(workflowId || '', {
-  //   enabled: !!workflowId,
-  // })
-  // const hasExistingTemplate = !!existingTemplate
-  // const templateStatus = existingTemplate
-  //   ? {
-  //       status: existingTemplate.status as 'pending' | 'approved' | 'rejected' | null,
-  //       views: existingTemplate.views,
-  //       stars: existingTemplate.stars,
-  //     }
-  //   : null
+  const { data: existingTemplate } = useTemplateByWorkflow(workflowId || '', {
+    enabled: !!workflowId,
+  })
+  const hasExistingTemplate = !!existingTemplate
 
   const deployMutation = useDeployWorkflow()
   const undeployMutation = useUndeployWorkflow()
@@ -403,10 +395,10 @@ export function DeployModal({
     }
   }, [])
 
-  // const handleTemplateFormSubmit = useCallback(() => {
-  //   const form = document.getElementById('template-deploy-form') as HTMLFormElement
-  //   form?.requestSubmit()
-  // }, [])
+  const handleTemplateFormSubmit = useCallback(() => {
+    const form = document.getElementById('template-deploy-form') as HTMLFormElement
+    form?.requestSubmit()
+  }, [])
 
   const handleMcpToolFormSubmit = useCallback(() => {
     const form = document.getElementById('mcp-deploy-form') as HTMLFormElement
@@ -450,11 +442,11 @@ export function DeployModal({
     setShowA2aDeleteConfirm(false)
   }, [])
 
-  // const handleTemplateDelete = useCallback(() => {
-  //   const form = document.getElementById('template-deploy-form')
-  //   const deleteTrigger = form?.querySelector('[data-template-delete-trigger]') as HTMLButtonElement
-  //   deleteTrigger?.click()
-  // }, [])
+  const handleTemplateDelete = useCallback(() => {
+    const form = document.getElementById('template-deploy-form')
+    const deleteTrigger = form?.querySelector('[data-template-delete-trigger]') as HTMLButtonElement
+    deleteTrigger?.click()
+  }, [])
 
   const isSubmitting = deployMutation.isPending
   const isUndeploying = undeployMutation.isPending
@@ -485,9 +477,9 @@ export function DeployModal({
                 <ModalTabsTrigger value='chat'>Chat</ModalTabsTrigger>
               )}
               {/* <ModalTabsTrigger value='form'>Form</ModalTabsTrigger> */}
-              {/* {!permissionConfig.hideDeployTemplate && (
+              {!permissionConfig.hideDeployTemplate && (
                 <ModalTabsTrigger value='template'>Template</ModalTabsTrigger>
-              )} */}
+              )}
             </ModalTabsList>
 
             <ModalBody className='min-h-0 flex-1'>
@@ -551,7 +543,7 @@ export function DeployModal({
                 />
               </ModalTabsContent>
 
-              {/* <ModalTabsContent value='template'>
+              <ModalTabsContent value='template'>
                 {workflowId && (
                   <TemplateDeploy
                     workflowId={workflowId}
@@ -560,7 +552,7 @@ export function DeployModal({
                     onSubmittingChange={setTemplateSubmitting}
                   />
                 )}
-              </ModalTabsContent> */}
+              </ModalTabsContent>
 
               {/* <ModalTabsContent value='form'>
                 {workflowId && (
@@ -693,22 +685,14 @@ export function DeployModal({
               </div>
             </ModalFooter>
           )}
-          {/* {activeTab === 'template' && (
+          {activeTab === 'template' && (
             <ModalFooter className='items-center justify-between'>
-              {hasExistingTemplate && templateStatus ? (
-                <TemplateStatusBadge
-                  status={templateStatus.status}
-                  views={templateStatus.views}
-                  stars={templateStatus.stars}
-                />
-              ) : (
-                <div />
-              )}
+              <div />
               <div className='flex items-center gap-2'>
                 {hasExistingTemplate && (
                   <Button
                     type='button'
-                    variant='destructive'
+                    variant='default'
                     onClick={handleTemplateDelete}
                     disabled={templateSubmitting}
                   >
@@ -731,7 +715,7 @@ export function DeployModal({
                 </Button>
               </div>
             </ModalFooter>
-          )} */}
+          )}
           {/* {activeTab === 'form' && (
             <ModalFooter className='items-center justify-between'>
               <div />

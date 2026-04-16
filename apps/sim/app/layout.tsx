@@ -207,9 +207,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name='format-detection' content='telephone=no' />
         <meta httpEquiv='x-ua-compatible' content='ie=edge' />
 
-        {/* OneDollarStats Analytics */}
-        <link rel='dns-prefetch' href='https://assets.onedollarstats.com' />
-        <script defer src='https://assets.onedollarstats.com/stonks.js' />
+        {/* OneDollarStats Analytics — hosted only */}
+        {isHosted && (
+          <>
+            <link rel='dns-prefetch' href='https://assets.onedollarstats.com' />
+            <script defer src='https://assets.onedollarstats.com/stonks.js' />
+          </>
+        )}
 
         {/* Google Tag Manager — hosted only */}
         {isHosted && (

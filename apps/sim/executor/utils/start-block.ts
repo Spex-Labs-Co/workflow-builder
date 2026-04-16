@@ -10,7 +10,7 @@ import type { NormalizedBlockOutput, UserFile } from '@/executor/types'
 import type { SerializedBlock } from '@/serializer/types'
 import { safeAssign } from '@/tools/safe-assign'
 
-type ExecutionKind = 'chat' | 'manual' | 'api'
+type ExecutionKind = 'chat' | 'manual' | 'api' | 'workflow'
 
 export interface ExecutorStartResolution {
   blockId: string
@@ -338,6 +338,52 @@ function buildChatOutput(workflowInput: unknown): NormalizedBlockOutput {
   return mergeFilesIntoOutput(output, workflowInput)
 }
 
+function buildSpexTriggerOutput(
+  workflowInput: unknown,
+  structuredInput: Record<string, unknown>,
+  hasStructured: boolean
+): NormalizedBlockOutput {
+  const output: NormalizedBlockOutput = {}
+  const source = isPlainObject(workflowInput) ? workflowInput : undefined
+
+  if (source) {
+    for (const [key, value] of Object.entries(source)) {
+      if (key === 'onUploadError') continue
+      output[key] = value
+    }
+  }
+
+  const paramsValue = isPlainObject(source?.params) ? { ...source.params } : {}
+  if (hasStructured) {
+    output.params = { ...structuredInput, ...paramsValue }
+  } else if (Object.keys(paramsValue).length > 0) {
+    output.params = paramsValue
+  }
+
+  const primaryTextCandidate =
+    typeof source?.input === 'string'
+      ? source.input
+      : typeof source?.text === 'string'
+        ? source.text
+        : typeof workflowInput === 'string'
+          ? workflowInput
+          : ''
+
+  if (primaryTextCandidate) {
+    output.input = primaryTextCandidate
+    output.text = primaryTextCandidate
+  } else {
+    if (!Object.hasOwn(output, 'input')) {
+      output.input = undefined
+    }
+    if (!Object.hasOwn(output, 'text')) {
+      output.text = undefined
+    }
+  }
+
+  return mergeFilesIntoOutput(output, workflowInput)
+}
+
 function buildLegacyStarterOutput(
   finalInput: unknown,
   workflowInput: unknown,
@@ -454,6 +500,9 @@ export function buildStartBlockOutput(options: StartBlockOutputOptions): Normali
 
     case StartBlockPath.SPLIT_MANUAL:
       return buildManualTriggerOutput(finalInput, workflowInput)
+
+    case StartBlockPath.SPEX:
+      return buildSpexTriggerOutput(workflowInput, structuredInput, hasStructured)
 
     case StartBlockPath.EXTERNAL_TRIGGER:
       return buildIntegrationTriggerOutput(workflowInput, structuredInput, hasStructured)

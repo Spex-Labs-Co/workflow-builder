@@ -121,6 +121,18 @@ export const dynamic = 'force-dynamic'
 
 const INLINE_TRIGGER_TYPES = new Set<CoreTriggerType>(['manual', 'workflow'])
 
+function toRuntimeWorkflowTriggerType(
+  triggerType: CoreTriggerType
+): 'api' | 'chat' | 'workflow' {
+  if (triggerType === 'chat') {
+    return 'chat'
+  }
+  if (triggerType === 'workflow') {
+    return 'workflow'
+  }
+  return 'api'
+}
+
 function resolveOutputIds(
   selectedOutputs: string[] | undefined,
   blocks: Record<string, any>
@@ -1067,7 +1079,7 @@ async function handleExecutePost(
         streamConfig: {
           selectedOutputs: resolvedSelectedOutputs,
           isSecureMode: false,
-          workflowTriggerType: triggerType === 'chat' ? 'chat' : 'api',
+          workflowTriggerType: toRuntimeWorkflowTriggerType(triggerType),
           includeFileBase64,
           base64MaxBytes,
           timeoutMs: preprocessResult.executionTimeout?.sync,
@@ -1083,7 +1095,7 @@ async function handleExecutePost(
               enabled: true,
               selectedOutputs: resolvedSelectedOutputs,
               isSecureMode: false,
-              workflowTriggerType: triggerType === 'chat' ? 'chat' : 'api',
+              workflowTriggerType: toRuntimeWorkflowTriggerType(triggerType),
               onStream,
               onBlockComplete,
               skipLoggingComplete: true,

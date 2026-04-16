@@ -29,7 +29,7 @@ const DANGEROUS_KEYS = ['__proto__', 'constructor', 'prototype']
 export interface StreamingConfig {
   selectedOutputs?: string[]
   isSecureMode?: boolean
-  workflowTriggerType?: 'api' | 'chat'
+  workflowTriggerType?: 'api' | 'chat' | 'workflow'
   includeFileBase64?: boolean
   base64MaxBytes?: number
   timeoutMs?: number

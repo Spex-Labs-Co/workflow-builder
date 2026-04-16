@@ -177,6 +177,7 @@ import { SixtyfourBlock } from '@/blocks/blocks/sixtyfour'
 import { SlackBlock } from '@/blocks/blocks/slack'
 import { SmtpBlock } from '@/blocks/blocks/smtp'
 import { SpotifyBlock } from '@/blocks/blocks/spotify'
+import { SpexTriggerBlock } from '@/blocks/blocks/spex_trigger'
 import { SQSBlock } from '@/blocks/blocks/sqs'
 import { SSHBlock } from '@/blocks/blocks/ssh'
 import { StagehandBlock } from '@/blocks/blocks/stagehand'
@@ -417,6 +418,7 @@ export const registry: Record<string, BlockConfig> = {
   slack: SlackBlock,
   smtp: SmtpBlock,
   spotify: SpotifyBlock,
+  spex_trigger: SpexTriggerBlock,
   secrets_manager: SecretsManagerBlock,
   sqs: SQSBlock,
   ssh: SSHBlock,

@@ -13,6 +13,7 @@ export const INPUT_DEFINITION_TRIGGER_TYPES = [
   'start_trigger',
   'api_trigger',
   'input_trigger',
+  'spex_trigger',
 ] as const
 
 export type InputDefinitionTriggerType = (typeof INPUT_DEFINITION_TRIGGER_TYPES)[number]

@@ -1829,6 +1829,7 @@ export const templates = pgTable(
     views: integer('views').notNull().default(0),
     stars: integer('stars').notNull().default(0),
     status: templateStatusEnum('status').notNull().default('pending'),
+    visibility: text('visibility').notNull().default('private'),
     tags: text('tags').array().notNull().default(sql`'{}'::text[]`), // Array of tags
     requiredCredentials: jsonb('required_credentials').notNull().default('[]'), // Array of credential requirements
     state: jsonb('state').notNull(), // Store the workflow state directly
@@ -1848,10 +1849,15 @@ export const templates = pgTable(
     // Composite indexes for common queries
     statusViewsIdx: index('templates_status_views_idx').on(table.status, table.views),
     statusStarsIdx: index('templates_status_stars_idx').on(table.status, table.stars),
+    visibilityIdx: index('templates_visibility_idx').on(table.visibility),
 
     // Temporal indexes
     createdAtIdx: index('templates_created_at_idx').on(table.createdAt),
     updatedAtIdx: index('templates_updated_at_idx').on(table.updatedAt),
+    visibilityCheck: check(
+      'templates_visibility_check',
+      sql`${table.visibility} IN ('private', 'public')`
+    ),
   })
 )
 

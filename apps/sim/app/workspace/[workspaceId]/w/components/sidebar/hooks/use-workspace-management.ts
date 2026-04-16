@@ -41,7 +41,7 @@ export function useWorkspaceManagement({
     isLoading: isWorkspacesLoading,
     isFetching: isWorkspacesFetching,
     refetch: refetchWorkspaces,
-  } = useWorkspacesQuery(Boolean(sessionUserId))
+  } = useWorkspacesQuery(true)
 
   const leaveWorkspaceMutation = useLeaveWorkspace()
   const createWorkspaceMutation = useCreateWorkspace()

@@ -39,6 +39,7 @@ interface TemplateFormData {
   about: string
   creatorId: string
   tags: string[]
+  visibility: 'private' | 'public'
 }
 
 const initialFormData: TemplateFormData = {
@@ -47,6 +48,7 @@ const initialFormData: TemplateFormData = {
   about: '',
   creatorId: '',
   tags: [],
+  visibility: 'private',
 }
 
 interface TemplateDeployProps {
@@ -126,6 +128,7 @@ export function TemplateDeploy({
         about: existingTemplate.details?.about || '',
         creatorId: existingTemplate.creatorId || '',
         tags: existingTemplate.tags || [],
+        visibility: existingTemplate.visibility || 'private',
       })
     }
   }, [existingTemplate])
@@ -147,6 +150,7 @@ export function TemplateDeploy({
         },
         creatorId: formData.creatorId,
         tags: formData.tags,
+        visibility: formData.visibility,
       }
 
       let templateId: string
@@ -324,6 +328,25 @@ export function TemplateDeploy({
               disabled={loadingCreators || isSubmitting}
             />
           )}
+        </div>
+
+        <div>
+          <Label className='mb-[6.5px] block pl-0.5 font-medium text-[var(--text-primary)] text-small'>
+            Visibility
+          </Label>
+          <Combobox
+            options={[
+              { label: 'Private', value: 'private' },
+              { label: 'Public', value: 'public' },
+            ]}
+            value={formData.visibility}
+            selectedValue={formData.visibility}
+            onChange={(value) => updateField('visibility', value as 'private' | 'public')}
+            placeholder='Select visibility'
+            editable={false}
+            filterOptions={false}
+            disabled={isSubmitting}
+          />
         </div>
 
         <div>

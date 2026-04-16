@@ -7,6 +7,8 @@ import { z } from 'zod'
 import { AuditAction, AuditResourceType, recordAudit } from '@/lib/audit/log'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
+import { archiveSpexTemplateSource } from '@/lib/spex/control-plane'
+import { syncSpexTemplateSource } from '@/lib/spex/control-plane'
 import { canAccessTemplate } from '@/lib/templates/permissions'
 import {
   extractRequiredCredentials,
@@ -102,6 +104,7 @@ const updateTemplateSchema = z.object({
   tags: z.array(z.string()).max(10, 'Maximum 10 tags allowed').optional(),
   updateState: z.boolean().optional(), // Explicitly request state update from current workflow
   status: z.enum(['approved', 'rejected', 'pending']).optional(), // Status change (super users only)
+  visibility: z.enum(['private', 'public']).optional(),
 })
 
 // PUT /api/templates/[id] - Update a template
@@ -127,7 +130,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       )
     }
 
-    const { name, details, creatorId, tags, updateState, status } = validationResult.data
+    const { name, details, creatorId, tags, updateState, status, visibility } =
+      validationResult.data
 
     const existingTemplate = await db.select().from(templates).where(eq(templates.id, id)).limit(1)
 
@@ -157,6 +161,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       details !== undefined ||
       creatorId !== undefined ||
       tags !== undefined ||
+      visibility !== undefined ||
       updateState
 
     if (hasNonStatusUpdates) {
@@ -187,6 +192,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (tags !== undefined) updateData.tags = tags
     if (creatorId !== undefined) updateData.creatorId = creatorId
     if (status !== undefined) updateData.status = status
+    if (visibility !== undefined) updateData.visibility = visibility
 
     if (updateState && template.workflowId) {
       const { verifyWorkflowAccess } = await import('@/socket/middleware/permissions')
@@ -240,6 +246,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       .where(eq(templates.id, id))
       .returning()
 
+    let spexSourceSynced = false
+    if (hasNonStatusUpdates && template.workflowId) {
+      const synced = await syncSpexTemplateSource({
+        simUserId: session.user.id,
+        simTemplateId: id,
+        sourceWorkflowId: template.workflowId,
+        name: updateData.name ?? template.name,
+        description:
+          (updateData.details as { tagline?: string } | undefined)?.tagline ??
+          ((template.details as { tagline?: string } | null)?.tagline ?? null),
+        requiredSetup: updateData.requiredCredentials ?? template.requiredCredentials ?? [],
+        visibility,
+        bumpVersion: true,
+      })
+      spexSourceSynced = synced.synced
+    }
+
     logger.info(`[${requestId}] Successfully updated template: ${id}`)
 
     recordAudit({
@@ -257,6 +280,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({
       data: updatedTemplate[0],
       message: 'Template updated successfully',
+      spexSourceSynced,
     })
   } catch (error: any) {
     logger.error(`[${requestId}] Error updating template: ${id}`, error)
@@ -306,6 +330,11 @@ export async function DELETE(
 
     await db.delete(templates).where(eq(templates.id, id))
 
+    const spexSourceArchived = await archiveSpexTemplateSource({
+      simUserId: session.user.id,
+      simTemplateId: id,
+    })
+
     logger.info(`[${requestId}] Deleted template: ${id}`)
 
     recordAudit({
@@ -320,7 +349,7 @@ export async function DELETE(
       request,
     })
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, spexSourceArchived: spexSourceArchived.synced })
   } catch (error: any) {
     logger.error(`[${requestId}] Error deleting template: ${id}`, error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

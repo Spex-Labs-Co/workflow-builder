@@ -6,12 +6,8 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { AuditAction, AuditResourceType, recordAudit } from '@/lib/audit/log'
 import { getSession } from '@/lib/auth'
-import { PlatformEvents } from '@/lib/core/telemetry'
-import { generateId } from '@/lib/core/utils/uuid'
 import { captureServerEvent } from '@/lib/posthog/server'
-import { buildDefaultWorkflowArtifacts } from '@/lib/workflows/defaults'
-import { saveWorkflowToNormalizedTables } from '@/lib/workflows/persistence/utils'
-import { getRandomWorkspaceColor } from '@/lib/workspaces/colors'
+import { createDefaultWorkspace, createWorkspaceForUser } from '@/lib/workspaces/default-workspace'
 import type { WorkspaceScope } from '@/lib/workspaces/utils'
 
 const logger = createLogger('Workspaces')
@@ -96,7 +92,12 @@ export async function POST(req: Request) {
   try {
     const { name, color, skipDefaultWorkflow } = createWorkspaceSchema.parse(await req.json())
 
-    const newWorkspace = await createWorkspace(session.user.id, name, skipDefaultWorkflow, color)
+    const newWorkspace = await createWorkspaceForUser(
+      session.user.id,
+      name,
+      skipDefaultWorkflow,
+      color
+    )
 
     captureServerEvent(
       session.user.id,
@@ -126,101 +127,6 @@ export async function POST(req: Request) {
   } catch (error) {
     logger.error('Error creating workspace:', error)
     return NextResponse.json({ error: 'Failed to create workspace' }, { status: 500 })
-  }
-}
-
-async function createDefaultWorkspace(userId: string, userName?: string | null) {
-  const firstName = userName?.split(' ')[0] || null
-  const workspaceName = firstName ? `${firstName}'s Workspace` : 'My Workspace'
-  return createWorkspace(userId, workspaceName)
-}
-
-async function createWorkspace(
-  userId: string,
-  name: string,
-  skipDefaultWorkflow = false,
-  explicitColor?: string
-) {
-  const workspaceId = generateId()
-  const workflowId = generateId()
-  const now = new Date()
-  const color = explicitColor || getRandomWorkspaceColor()
-
-  try {
-    await db.transaction(async (tx) => {
-      await tx.insert(workspace).values({
-        id: workspaceId,
-        name,
-        color,
-        ownerId: userId,
-        billedAccountUserId: userId,
-        allowPersonalApiKeys: true,
-        createdAt: now,
-        updatedAt: now,
-      })
-
-      await tx.insert(permissions).values({
-        id: generateId(),
-        entityType: 'workspace' as const,
-        entityId: workspaceId,
-        userId: userId,
-        permissionType: 'admin' as const,
-        createdAt: now,
-        updatedAt: now,
-      })
-
-      if (!skipDefaultWorkflow) {
-        await tx.insert(workflow).values({
-          id: workflowId,
-          userId,
-          workspaceId,
-          folderId: null,
-          name: 'default-agent',
-          description: 'Your first workflow - start building here!',
-          color: '#3972F6',
-          lastSynced: now,
-          createdAt: now,
-          updatedAt: now,
-          isDeployed: false,
-          runCount: 0,
-          variables: {},
-        })
-
-        const { workflowState } = buildDefaultWorkflowArtifacts()
-        await saveWorkflowToNormalizedTables(workflowId, workflowState, tx)
-      }
-
-      logger.info(
-        skipDefaultWorkflow
-          ? `Created workspace ${workspaceId} for user ${userId}`
-          : `Created workspace ${workspaceId} with initial workflow ${workflowId} for user ${userId}`
-      )
-    })
-  } catch (error) {
-    logger.error(`Failed to create workspace ${workspaceId}:`, error)
-    throw error
-  }
-
-  try {
-    PlatformEvents.workspaceCreated({
-      workspaceId,
-      userId,
-      name,
-    })
-  } catch {
-    // Telemetry should not fail the operation
-  }
-
-  return {
-    id: workspaceId,
-    name,
-    color,
-    ownerId: userId,
-    billedAccountUserId: userId,
-    allowPersonalApiKeys: true,
-    createdAt: now,
-    updatedAt: now,
-    role: 'owner',
   }
 }
 

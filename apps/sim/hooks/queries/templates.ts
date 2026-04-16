@@ -55,6 +55,7 @@ export interface Template {
   views: number
   stars: number
   status: 'pending' | 'approved' | 'rejected'
+  visibility: 'private' | 'public'
   tags: string[]
   requiredCredentials: Record<string, any>
   state: any
@@ -88,6 +89,7 @@ export interface CreateTemplateInput {
   }
   creatorId?: string
   tags?: string[]
+  visibility?: 'private' | 'public'
 }
 
 export interface UpdateTemplateInput {
@@ -99,6 +101,7 @@ export interface UpdateTemplateInput {
   creatorId?: string
   tags?: string[]
   updateState?: boolean
+  visibility?: 'private' | 'public'
 }
 
 async function fetchTemplates(

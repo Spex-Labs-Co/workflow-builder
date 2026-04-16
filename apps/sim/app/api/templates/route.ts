@@ -14,6 +14,7 @@ import { AuditAction, AuditResourceType, recordAudit } from '@/lib/audit/log'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { generateId } from '@/lib/core/utils/uuid'
+import { syncSpexTemplateSource } from '@/lib/spex/control-plane'
 import { canAccessTemplate, verifyEffectiveSuperUser } from '@/lib/templates/permissions'
 import {
   extractRequiredCredentials,
@@ -43,6 +44,7 @@ const CreateTemplateSchema = z.object({
     .optional(),
   creatorId: z.string().min(1, 'Creator profile is required'),
   tags: z.array(z.string()).max(10, 'Maximum 10 tags allowed').optional().default([]),
+  visibility: z.enum(['private', 'public']).optional().default('private'),
 })
 
 // Schema for query parameters
@@ -152,6 +154,7 @@ export async function GET(request: NextRequest) {
         views: templates.views,
         stars: templates.stars,
         status: templates.status,
+        visibility: templates.visibility,
         tags: templates.tags,
         requiredCredentials: templates.requiredCredentials,
         state: templates.state,
@@ -326,6 +329,7 @@ export async function POST(request: NextRequest) {
       views: 0,
       stars: 0,
       status: 'pending' as const, // All new templates start as pending
+      visibility: data.visibility,
       tags: data.tags || [],
       requiredCredentials: requiredCredentials, // Store the extracted credential requirements
       state: sanitizedState, // Store the sanitized state without credential values
@@ -334,6 +338,18 @@ export async function POST(request: NextRequest) {
     }
 
     await db.insert(templates).values(newTemplate)
+
+    const spexSync = await syncSpexTemplateSource({
+      simUserId: session.user.id,
+      simTemplateId: templateId,
+      sourceWorkflowId: data.workflowId,
+      name: data.name,
+      description: data.details?.tagline || null,
+      requiredSetup: requiredCredentials,
+      visibility: data.visibility,
+      bumpVersion: false,
+      ownerEnabled: false,
+    })
 
     logger.info(`[${requestId}] Successfully created template: ${templateId}`)
 
@@ -353,6 +369,7 @@ export async function POST(request: NextRequest) {
       {
         id: templateId,
         message: 'Template submitted for approval successfully',
+        spexSourceSynced: spexSync.synced,
       },
       { status: 201 }
     )

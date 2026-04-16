@@ -435,8 +435,17 @@ export class DAGExecutor {
         }
       }
     } else {
+      const executionKind =
+        this.contextExtensions.metadata?.triggerType === 'chat'
+          ? 'chat'
+          : this.contextExtensions.metadata?.triggerType === 'api'
+            ? 'api'
+            : this.contextExtensions.metadata?.triggerType === 'workflow'
+              ? 'workflow'
+              : 'manual'
+
       startResolution = resolveExecutorStartBlock(this.workflow.blocks, {
-        execution: 'manual',
+        execution: executionKind,
         isChildWorkflow: false,
       })
 

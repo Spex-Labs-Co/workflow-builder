@@ -9,6 +9,7 @@ export const TRIGGER_TYPES = {
   MANUAL: 'manual_trigger',
   CHAT: 'chat_trigger',
   API: 'api_trigger',
+  SPEX: 'spex_trigger',
   WEBHOOK: 'webhook',
   GENERIC_WEBHOOK: 'generic_webhook',
   SCHEDULE: 'schedule',
@@ -25,10 +26,11 @@ export enum StartBlockPath {
   SPLIT_API = 'legacy_api_trigger',
   SPLIT_CHAT = 'legacy_chat_trigger',
   SPLIT_MANUAL = 'legacy_manual_trigger',
+  SPEX = 'spex_trigger',
   EXTERNAL_TRIGGER = 'external_trigger',
 }
 
-type StartExecutionKind = 'chat' | 'manual' | 'api'
+type StartExecutionKind = 'chat' | 'manual' | 'api' | 'workflow'
 
 const EXECUTION_PRIORITIES: Record<StartExecutionKind, StartBlockPath[]> = {
   chat: [StartBlockPath.UNIFIED, StartBlockPath.SPLIT_CHAT, StartBlockPath.LEGACY_STARTER],
@@ -44,6 +46,13 @@ const EXECUTION_PRIORITIES: Record<StartExecutionKind, StartBlockPath[]> = {
     StartBlockPath.UNIFIED,
     StartBlockPath.SPLIT_API,
     StartBlockPath.SPLIT_INPUT,
+    StartBlockPath.LEGACY_STARTER,
+  ],
+  workflow: [
+    StartBlockPath.SPEX,
+    StartBlockPath.UNIFIED,
+    StartBlockPath.SPLIT_INPUT,
+    StartBlockPath.SPLIT_API,
     StartBlockPath.LEGACY_STARTER,
   ],
 }
@@ -93,6 +102,8 @@ export function classifyStartBlockType(
       return StartBlockPath.SPLIT_CHAT
     case TRIGGER_TYPES.MANUAL:
       return StartBlockPath.SPLIT_MANUAL
+    case TRIGGER_TYPES.SPEX:
+      return StartBlockPath.SPEX
     case TRIGGER_TYPES.WEBHOOK:
     case TRIGGER_TYPES.SCHEDULE:
       return StartBlockPath.EXTERNAL_TRIGGER
@@ -153,6 +164,14 @@ function supportsExecution(path: StartBlockPath, execution: StartExecutionKind):
 
   if (execution === 'api') {
     return path === StartBlockPath.SPLIT_API || path === StartBlockPath.SPLIT_INPUT
+  }
+
+  if (execution === 'workflow') {
+    return (
+      path === StartBlockPath.SPEX ||
+      path === StartBlockPath.SPLIT_INPUT ||
+      path === StartBlockPath.SPLIT_API
+    )
   }
 
   return (
@@ -242,6 +261,7 @@ export const TRIGGER_REFERENCE_ALIAS_MAP = {
   api: TRIGGER_TYPES.API,
   chat: TRIGGER_TYPES.CHAT,
   manual: TRIGGER_TYPES.START,
+  workflow: TRIGGER_TYPES.SPEX,
 } as const
 
 export type TriggerReferenceAlias = keyof typeof TRIGGER_REFERENCE_ALIAS_MAP
@@ -343,6 +363,26 @@ export class TriggerUtils {
   }
 
   /**
+   * Check if a block is a workflow-compatible Spex trigger
+   */
+  static isWorkflowTrigger(block: { type: string; subBlocks?: any }): boolean {
+    if (block.type === TRIGGER_TYPES.SPEX || block.type === TRIGGER_TYPES.START) {
+      return true
+    }
+
+    if (block.type === TRIGGER_TYPES.INPUT || block.type === TRIGGER_TYPES.API) {
+      return true
+    }
+
+    if (block.type === TRIGGER_TYPES.STARTER) {
+      const mode = block.subBlocks?.startWorkflow?.value
+      return mode === 'api' || mode === 'run' || mode === 'manual' || mode === undefined
+    }
+
+    return false
+  }
+
+  /**
    * Get the default name for a trigger type
    */
   static getDefaultTriggerName(triggerType: string): string | null {
@@ -365,6 +405,8 @@ export class TriggerUtils {
         return 'Manual'
       case TRIGGER_TYPES.API:
         return 'API'
+      case TRIGGER_TYPES.SPEX:
+        return 'Spex AI'
       case TRIGGER_TYPES.START:
         return 'Start'
       case TRIGGER_TYPES.WEBHOOK:
@@ -381,7 +423,7 @@ export class TriggerUtils {
    */
   static findTriggersByType<T extends { type: string; subBlocks?: any }>(
     blocks: T[] | Record<string, T>,
-    triggerType: 'chat' | 'manual' | 'api',
+    triggerType: 'chat' | 'manual' | 'api' | 'workflow',
     isChildWorkflow = false
   ): T[] {
     const blockArray = Array.isArray(blocks) ? blocks : Object.values(blocks)
@@ -393,6 +435,8 @@ export class TriggerUtils {
         return blockArray.filter((block) => TriggerUtils.isManualTrigger(block))
       case 'api':
         return blockArray.filter((block) => TriggerUtils.isApiTrigger(block, isChildWorkflow))
+      case 'workflow':
+        return blockArray.filter((block) => TriggerUtils.isWorkflowTrigger(block))
       default:
         return []
     }
@@ -403,7 +447,7 @@ export class TriggerUtils {
    */
   static findStartBlock<T extends { type: string; subBlocks?: any }>(
     blocks: Record<string, T>,
-    executionType: 'chat' | 'manual' | 'api',
+    executionType: 'chat' | 'manual' | 'api' | 'workflow',
     isChildWorkflow = false
   ): (StartBlockCandidate<T> & { block: T }) | null {
     const candidates = resolveStartCandidates(blocks, {
@@ -437,13 +481,14 @@ export class TriggerUtils {
   static requiresSingleInstance(triggerType: string): boolean {
     // Each trigger type can only have one instance of itself
     // Manual and Input Form can coexist
-    // API, Chat triggers must be unique
+    // API, Chat, Spex, and Start triggers must be unique
     // Schedules and webhooks can have multiple instances
     return (
       triggerType === TRIGGER_TYPES.API ||
       triggerType === TRIGGER_TYPES.INPUT ||
       triggerType === TRIGGER_TYPES.MANUAL ||
       triggerType === TRIGGER_TYPES.CHAT ||
+      triggerType === TRIGGER_TYPES.SPEX ||
       triggerType === TRIGGER_TYPES.START
     )
   }
@@ -473,6 +518,7 @@ export class TriggerUtils {
         triggerType === TRIGGER_TYPES.INPUT ||
         triggerType === TRIGGER_TYPES.MANUAL ||
         triggerType === TRIGGER_TYPES.API ||
+        triggerType === TRIGGER_TYPES.SPEX ||
         triggerType === TRIGGER_TYPES.START
       ) {
         return true
@@ -486,6 +532,7 @@ export class TriggerUtils {
           block.type === TRIGGER_TYPES.INPUT ||
           block.type === TRIGGER_TYPES.MANUAL ||
           block.type === TRIGGER_TYPES.API ||
+          block.type === TRIGGER_TYPES.SPEX ||
           block.type === TRIGGER_TYPES.START
       )
       if (hasModernTriggers) {
@@ -518,7 +565,11 @@ export class TriggerUtils {
       return blockArray.some((block) => block.type === TRIGGER_TYPES.CHAT)
     }
 
-    // Centralized rule: only API, Input, Chat are single-instance
+    if (triggerType === TRIGGER_TYPES.SPEX) {
+      return blockArray.some((block) => block.type === TRIGGER_TYPES.SPEX)
+    }
+
+    // Centralized rule for all single-instance trigger types
     if (!TriggerUtils.requiresSingleInstance(triggerType)) {
       return false
     }
@@ -553,10 +604,11 @@ export class TriggerUtils {
    * Get trigger validation message
    */
   static getTriggerValidationMessage(
-    triggerType: 'chat' | 'manual' | 'api',
+    triggerType: 'chat' | 'manual' | 'api' | 'workflow',
     issue: 'missing' | 'multiple'
   ): string {
-    const triggerName = triggerType.charAt(0).toUpperCase() + triggerType.slice(1)
+    const triggerName =
+      triggerType === 'workflow' ? 'Spex AI' : triggerType.charAt(0).toUpperCase() + triggerType.slice(1)
 
     if (issue === 'missing') {
       return `${triggerName} execution requires a ${triggerName} Trigger block`

@@ -6,6 +6,7 @@ import { generateId } from '@/lib/core/utils/uuid'
 import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
+import { reportSpexWorkflowCompletion } from '@/lib/spex/control-plane'
 import {
   executeWorkflowCore,
   wasExecutionFinalizedByCore,
@@ -17,6 +18,52 @@ import { hasExecutionResult } from '@/executor/utils/errors'
 import type { CoreTriggerType } from '@/stores/logs/filters/types'
 
 const logger = createLogger('TriggerWorkflowExecution')
+
+type SpexExecutionContext = {
+  spexUserId: string
+  installId?: string | null
+  runtimeSource?: string | null
+}
+
+function extractSpexExecutionContext(input: unknown): SpexExecutionContext | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null
+  }
+
+  const rawContext = (input as Record<string, unknown>).spex_context
+  if (!rawContext || typeof rawContext !== 'object' || Array.isArray(rawContext)) {
+    return null
+  }
+
+  const spexUserId = String((rawContext as Record<string, unknown>).spexUserId || '').trim()
+  if (!spexUserId) {
+    return null
+  }
+
+  const installId = String((rawContext as Record<string, unknown>).installId || '').trim()
+  const runtimeSource = String((rawContext as Record<string, unknown>).runtimeSource || '').trim()
+
+  return {
+    spexUserId,
+    installId: installId || null,
+    runtimeSource: runtimeSource || null,
+  }
+}
+
+function summarizeOutput(output: unknown): string | null {
+  if (typeof output === 'string' && output.trim()) {
+    return output.trim()
+  }
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    for (const key of ['text', 'response', 'message', 'result']) {
+      const value = (output as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim()
+      }
+    }
+  }
+  return null
+}
 
 export function buildWorkflowCorrelation(
   payload: WorkflowExecutionPayload
@@ -57,6 +104,10 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
   const correlation = buildWorkflowCorrelation(payload)
   const executionId = correlation.executionId
   const requestId = correlation.requestId
+  const spexContext =
+    (payload.triggerType || payload.correlation?.triggerType) === 'workflow'
+      ? extractSpexExecutionContext(payload.input)
+      : null
 
   logger.info(`[${requestId}] Starting workflow execution job: ${workflowId}`, {
     userId: payload.userId,
@@ -162,6 +213,21 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       executionId,
     })
 
+    if (triggerType === 'workflow' && spexContext) {
+      await reportSpexWorkflowCompletion({
+        executionId,
+        spexUserId: spexContext.spexUserId,
+        installId: spexContext.installId ?? null,
+        simWorkflowId: workflowId,
+        simUserId: actorUserId,
+        runtimeSource: spexContext.runtimeSource ?? null,
+        status: result.success ? 'completed' : 'error',
+        outputSummary: summarizeOutput(result.output),
+        output: result.output,
+        error: result.success ? null : (result.error ?? null),
+      })
+    }
+
     return {
       success: result.success,
       workflowId: payload.workflowId,
@@ -190,6 +256,21 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       },
       traceSpans,
     })
+
+    if (triggerType === 'workflow' && spexContext) {
+      await reportSpexWorkflowCompletion({
+        executionId,
+        spexUserId: spexContext.spexUserId,
+        installId: spexContext.installId ?? null,
+        simWorkflowId: workflowId,
+        simUserId: payload.userId,
+        runtimeSource: spexContext.runtimeSource ?? null,
+        status: 'error',
+        outputSummary: null,
+        output: executionResult?.output ?? null,
+        error: executionResult?.error ?? (error instanceof Error ? error.message : String(error)),
+      })
+    }
 
     throw error
   }

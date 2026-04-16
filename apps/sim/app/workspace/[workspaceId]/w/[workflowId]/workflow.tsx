@@ -76,6 +76,7 @@ import { isAnnotationOnlyBlock } from '@/executor/constants'
 import { useWorkspaceEnvironment } from '@/hooks/queries/environment'
 import { useAutoConnect, useSnapToGridSize } from '@/hooks/queries/general-settings'
 import { useWorkflowMap } from '@/hooks/queries/workflows'
+import { useAutosave } from '@/hooks/use-autosave'
 import { useCanvasViewport } from '@/hooks/use-canvas-viewport'
 import { useCollaborativeWorkflow } from '@/hooks/use-collaborative-workflow'
 import { useOAuthReturnForWorkflow } from '@/hooks/use-oauth-return'
@@ -86,10 +87,11 @@ import { useSearchModalStore } from '@/stores/modals/search/store'
 import { useNotificationStore } from '@/stores/notifications'
 import { usePanelEditorStore } from '@/stores/panel'
 import { useUndoRedoStore } from '@/stores/undo-redo'
+import { useVariablesStore } from '@/stores/variables/store'
 import { useVariablesModalStore } from '@/stores/variables/modal'
 import { useWorkflowDiffStore } from '@/stores/workflow-diff/store'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
-import { getUniqueBlockName, prepareBlockState } from '@/stores/workflows/utils'
+import { getUniqueBlockName, mergeSubblockState, prepareBlockState } from '@/stores/workflows/utils'
 import { useWorkflowStore } from '@/stores/workflows/workflow/store'
 import type { BlockState } from '@/stores/workflows/workflow/types'
 
@@ -354,7 +356,40 @@ const WorkflowContent = React.memo(
       [snapToGridSize]
     )
 
-    const { blocks, edges, lastSaved } = currentWorkflow
+    const { blocks, edges, loops, parallels, lastSaved } = currentWorkflow
+    const persistenceWorkflowId = activeWorkflowId || workflowIdParam
+    const workflowVariables = useVariablesStore(
+      useShallow((state) =>
+        Object.values(state.variables).filter((variable) => variable.workflowId === persistenceWorkflowId)
+      )
+    )
+
+    const mergedBlocksForPersistence = useMemo(
+      () => mergeSubblockState(blocks, persistenceWorkflowId),
+      [blocks, persistenceWorkflowId]
+    )
+
+    const workflowStateForPersistence = useMemo(
+      () => ({
+        blocks: mergedBlocksForPersistence,
+        edges,
+        loops: loops || {},
+        parallels: parallels || {},
+        variables: Object.fromEntries(workflowVariables.map((variable) => [variable.id, variable])),
+      }),
+      [mergedBlocksForPersistence, edges, loops, parallels, workflowVariables]
+    )
+
+    const serializedWorkflowStateForPersistence = useMemo(
+      () => JSON.stringify(workflowStateForPersistence),
+      [workflowStateForPersistence]
+    )
+    const serializedWorkflowStateRef = useRef(serializedWorkflowStateForPersistence)
+    const [lastPersistedWorkflowState, setLastPersistedWorkflowState] = useState('')
+
+    useEffect(() => {
+      serializedWorkflowStateRef.current = serializedWorkflowStateForPersistence
+    }, [serializedWorkflowStateForPersistence])
 
     const allBlocksLocked = useMemo(() => {
       const blockList = Object.values(blocks)
@@ -383,6 +418,54 @@ const WorkflowContent = React.memo(
         lastSaved,
       ]
     )
+
+    useEffect(() => {
+      if (!isWorkflowReady || currentWorkflow.isSnapshotView) return
+      setLastPersistedWorkflowState(serializedWorkflowStateRef.current)
+    }, [
+      isWorkflowReady,
+      currentWorkflow.isSnapshotView,
+      workflowIdParam,
+      activeWorkflowId,
+      hydration.phase,
+      hydration.workflowId,
+    ])
+
+    const persistWorkflowStateToDatabase = useCallback(async () => {
+      if (!persistenceWorkflowId) return
+
+      const payload = JSON.parse(serializedWorkflowStateRef.current)
+      const response = await fetch(`/api/workflows/${persistenceWorkflowId}/state`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...payload,
+          lastSaved: Date.now(),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '')
+        throw new Error(errorText || `Failed to persist workflow state: ${response.status}`)
+      }
+
+      setLastPersistedWorkflowState(serializedWorkflowStateRef.current)
+    }, [persistenceWorkflowId])
+
+    useAutosave({
+      content: serializedWorkflowStateForPersistence,
+      savedContent: lastPersistedWorkflowState,
+      onSave: persistWorkflowStateToDatabase,
+      delay: 1200,
+      enabled:
+        !embedded &&
+        !sandbox &&
+        currentWorkflow.isNormalMode &&
+        isWorkflowReady &&
+        Boolean(persistenceWorkflowId),
+    })
 
     const scheduleEmbeddedFit = useCallback(() => {
       if (!embedded || !isWorkflowReady) return
