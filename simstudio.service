@@ -1,0 +1,15 @@
+[Unit]
+Description=Spex SIM Web App
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/home/sim/apps/sim
+EnvironmentFile=/home/sim/apps/sim/.env
+Environment=PATH=/root/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -lc "./node_modules/.bin/next start --port 3000 --hostname 127.0.0.1"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
