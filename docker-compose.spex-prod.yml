@@ -1,0 +1,138 @@
+services:
+  simstudio:
+    image: ghcr.io/spex-labs-co/workflow-builder-simstudio:latest
+    ports:
+      - '3000:3000'
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-https://builder.spexlabs.co}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://builder.spexlabs.co}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - API_ENCRYPTION_KEY=${API_ENCRYPTION_KEY:-}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - REDIS_URL=${REDIS_URL:-}
+      - COPILOT_API_KEY=${COPILOT_API_KEY:-}
+      - SIM_AGENT_API_URL=${SIM_AGENT_API_URL:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
+      - SOCKET_SERVER_URL=${SOCKET_SERVER_URL:-http://realtime:3002}
+      - NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL:-https://realtime.spexlabs.co}
+      - ADMISSION_GATE_MAX_INFLIGHT=${ADMISSION_GATE_MAX_INFLIGHT:-500}
+      - DISPATCH_MAX_QUEUE_PER_WORKSPACE=${DISPATCH_MAX_QUEUE_PER_WORKSPACE:-1000}
+      - DISPATCH_MAX_QUEUE_GLOBAL=${DISPATCH_MAX_QUEUE_GLOBAL:-50000}
+      - SPEX_API_BASE_URL=${SPEX_API_BASE_URL}
+      - SPEX_FRONTEND_URL=${SPEX_FRONTEND_URL}
+      - SPEX_INTERNAL_API_KEY=${SPEX_INTERNAL_API_KEY}
+      - SPEX_AUTH_ONLY=${SPEX_AUTH_ONLY:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      realtime:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000']
+      interval: 90s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  sim-worker:
+    image: ghcr.io/spex-labs-co/workflow-builder-sim-worker:latest
+    command: ['bun', 'apps/sim/worker/index.ts']
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
+      - REDIS_URL=${REDIS_URL:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - API_ENCRYPTION_KEY=${API_ENCRYPTION_KEY:-}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - WORKER_PORT=${WORKER_PORT:-3001}
+      - WORKER_CONCURRENCY_WORKFLOW=${WORKER_CONCURRENCY_WORKFLOW:-50}
+      - WORKER_CONCURRENCY_WEBHOOK=${WORKER_CONCURRENCY_WEBHOOK:-30}
+      - WORKER_CONCURRENCY_SCHEDULE=${WORKER_CONCURRENCY_SCHEDULE:-20}
+      - WORKER_CONCURRENCY_MOTHERSHIP_JOB=${WORKER_CONCURRENCY_MOTHERSHIP_JOB:-10}
+      - WORKER_CONCURRENCY_CONNECTOR_SYNC=${WORKER_CONCURRENCY_CONNECTOR_SYNC:-5}
+      - WORKER_CONCURRENCY_DOCUMENT_PROCESSING=${WORKER_CONCURRENCY_DOCUMENT_PROCESSING:-20}
+      - WORKER_CONCURRENCY_NOTIFICATION_DELIVERY=${WORKER_CONCURRENCY_NOTIFICATION_DELIVERY:-10}
+      - DISPATCH_MAX_QUEUE_PER_WORKSPACE=${DISPATCH_MAX_QUEUE_PER_WORKSPACE:-1000}
+      - DISPATCH_MAX_QUEUE_GLOBAL=${DISPATCH_MAX_QUEUE_GLOBAL:-50000}
+      - SPEX_API_BASE_URL=${SPEX_API_BASE_URL}
+      - SPEX_INTERNAL_API_KEY=${SPEX_INTERNAL_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:${WORKER_PORT:-3001}/health/live']
+      interval: 90s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  realtime:
+    image: ghcr.io/spex-labs-co/workflow-builder-realtime:latest
+    ports:
+      - '3002:3002'
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://builder.spexlabs.co}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-https://builder.spexlabs.co}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - REDIS_URL=${REDIS_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3002/health']
+      interval: 90s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  migrations:
+    image: ghcr.io/spex-labs-co/workflow-builder-migrations:latest
+    working_dir: /app/packages/db
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ['bun', 'run', 'db:migrate']
+    restart: 'no'
+
+  db:
+    image: pgvector/pgvector:pg17
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-simstudio}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
