@@ -1,9 +1,7 @@
 name: Deploy Spex SIM
 
 on:
-  push:
-    branches:
-      - sim_v1
+  workflow_dispatch:
 
 jobs:
   deploy:

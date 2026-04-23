@@ -10,7 +10,7 @@ permissions:
 jobs:
   test-build:
     name: Test and Build
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -26,20 +26,20 @@ jobs:
         with:
           node-version: latest
 
-      - name: Mount Bun cache (Sticky Disk)
-        uses: useblacksmith/stickydisk@v1
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
         with:
           key: ${{ github.repository }}-bun-cache
           path: ~/.bun/install/cache
 
-      - name: Mount node_modules (Sticky Disk)
-        uses: useblacksmith/stickydisk@v1
+      - name: Cache node_modules
+        uses: actions/cache@v4
         with:
           key: ${{ github.repository }}-node-modules
           path: ./node_modules
 
-      - name: Mount Turbo cache (Sticky Disk)
-        uses: useblacksmith/stickydisk@v1
+      - name: Cache Turbo
+        uses: actions/cache@v4
         with:
           key: ${{ github.repository }}-turbo-cache
           path: ./.turbo
