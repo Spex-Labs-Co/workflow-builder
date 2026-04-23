@@ -1,7 +1,7 @@
 import { db } from '@sim/db'
 import { permissions, templates, user, workflow } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { auth } from '@/lib/auth'
@@ -10,11 +10,11 @@ import { checkInternalApiKey } from '@/lib/copilot/utils'
 import { env } from '@/lib/core/config/env'
 import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { generateId } from '@/lib/core/utils/uuid'
-import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
+import { syncSpexTemplateInstall } from '@/lib/spex/control-plane'
 import type { RegenerateStateInput } from '@/lib/workflows/persistence/utils'
 import { regenerateWorkflowStateIds } from '@/lib/workflows/persistence/utils'
 import { deduplicateWorkflowName } from '@/lib/workflows/utils'
-import { syncSpexTemplateInstall } from '@/lib/spex/control-plane'
+import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
 
 const logger = createLogger('SpexTemplateInstallAPI')
 const PASSWORD_PREFIX = 'spex-bootstrap::'
@@ -163,7 +163,10 @@ async function resolveDefaultWorkspace(simUserId: string, spexUserId: string) {
     .where(eq(user.id, simUserId))
     .limit(1)
 
-  const workspaceRecord = await ensureDefaultWorkspaceForUser(simUserId, simUserRecord?.name ?? null)
+  const workspaceRecord = await ensureDefaultWorkspaceForUser(
+    simUserId,
+    simUserRecord?.name ?? null
+  )
   await upsertIdentityLink(spexUserId, simUserId, workspaceRecord.id)
   return workspaceRecord.id
 }
@@ -295,15 +298,18 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await generateInternalToken(simUserId)
-    const stateResponse = await fetch(`${getInternalApiBaseUrl()}/api/workflows/${newWorkflowId}/state`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(workflowStateWithVariables),
-      cache: 'no-store',
-    })
+    const stateResponse = await fetch(
+      `${getInternalApiBaseUrl()}/api/workflows/${newWorkflowId}/state`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(workflowStateWithVariables),
+        cache: 'no-store',
+      }
+    )
 
     if (!stateResponse.ok) {
       const text = await stateResponse.text()

@@ -766,8 +766,7 @@ export class PauseResumeManager {
         | 'manual'
         | 'chat'
         | 'workflow'
-        | undefined) ??
-      'manual'
+        | undefined) ?? 'manual'
     const loggingSession = new LoggingSession(
       metadata.workflowId,
       parentExecutionId,

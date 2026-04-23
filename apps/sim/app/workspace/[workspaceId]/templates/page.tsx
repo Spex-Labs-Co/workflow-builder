@@ -4,10 +4,10 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth'
+import { canAccessTemplate } from '@/lib/templates/permissions'
 import { verifyWorkspaceMembership } from '@/app/api/workflows/utils'
 import type { Template as WorkspaceTemplate } from '@/app/workspace/[workspaceId]/templates/templates'
 import Templates from '@/app/workspace/[workspaceId]/templates/templates'
-import { canAccessTemplate } from '@/lib/templates/permissions'
 
 export const metadata: Metadata = {
   title: 'Templates',
@@ -33,11 +33,7 @@ export default async function TemplatesPage({ params }: TemplatesPageProps) {
   }
 
   const [currentUser, userSettings] = await Promise.all([
-    db
-      .select({ role: user.role })
-      .from(user)
-      .where(eq(user.id, session.user.id))
-      .limit(1),
+    db.select({ role: user.role }).from(user).where(eq(user.id, session.user.id)).limit(1),
     db
       .select({ superUserModeEnabled: settings.superUserModeEnabled })
       .from(settings)

@@ -26,8 +26,7 @@ export const SpexTriggerBlock: BlockConfig = {
       id: 'toolPrompt',
       title: 'Tool prompt',
       type: 'long-input',
-      placeholder:
-        'Explain when Spex AI should call this workflow and what it helps the user do.',
+      placeholder: 'Explain when Spex AI should call this workflow and what it helps the user do.',
       description:
         'Shown to Spex runtimes so they know when this workflow is relevant for the user.',
       required: true,
@@ -51,8 +50,7 @@ export const SpexTriggerBlock: BlockConfig = {
       id: 'inputFormat',
       title: 'Invoke params',
       type: 'input-format',
-      description:
-        'Define the structured params Spex AI can pass when invoking this workflow.',
+      description: 'Define the structured params Spex AI can pass when invoking this workflow.',
       mode: 'trigger',
     },
     {

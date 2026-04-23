@@ -87,8 +87,8 @@ import { useSearchModalStore } from '@/stores/modals/search/store'
 import { useNotificationStore } from '@/stores/notifications'
 import { usePanelEditorStore } from '@/stores/panel'
 import { useUndoRedoStore } from '@/stores/undo-redo'
-import { useVariablesStore } from '@/stores/variables/store'
 import { useVariablesModalStore } from '@/stores/variables/modal'
+import { useVariablesStore } from '@/stores/variables/store'
 import { useWorkflowDiffStore } from '@/stores/workflow-diff/store'
 import { useWorkflowRegistry } from '@/stores/workflows/registry/store'
 import { getUniqueBlockName, mergeSubblockState, prepareBlockState } from '@/stores/workflows/utils'
@@ -360,7 +360,9 @@ const WorkflowContent = React.memo(
     const persistenceWorkflowId = activeWorkflowId || workflowIdParam
     const workflowVariables = useVariablesStore(
       useShallow((state) =>
-        Object.values(state.variables).filter((variable) => variable.workflowId === persistenceWorkflowId)
+        Object.values(state.variables).filter(
+          (variable) => variable.workflowId === persistenceWorkflowId
+        )
       )
     )
 

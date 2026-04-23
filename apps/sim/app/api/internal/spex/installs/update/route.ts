@@ -81,7 +81,10 @@ export async function POST(request: NextRequest) {
     }
 
     const regeneratedState = regenerateWorkflowStateIds(template.state as RegenerateStateInput)
-    const variables = remapTemplateVariables(template.state as Record<string, unknown>, simWorkflowId)
+    const variables = remapTemplateVariables(
+      template.state as Record<string, unknown>,
+      simWorkflowId
+    )
     const statePayload = {
       ...regeneratedState,
       variables,

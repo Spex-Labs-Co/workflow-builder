@@ -7,8 +7,7 @@ import { z } from 'zod'
 import { AuditAction, AuditResourceType, recordAudit } from '@/lib/audit/log'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
-import { archiveSpexTemplateSource } from '@/lib/spex/control-plane'
-import { syncSpexTemplateSource } from '@/lib/spex/control-plane'
+import { archiveSpexTemplateSource, syncSpexTemplateSource } from '@/lib/spex/control-plane'
 import { canAccessTemplate } from '@/lib/templates/permissions'
 import {
   extractRequiredCredentials,
@@ -255,7 +254,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         name: updateData.name ?? template.name,
         description:
           (updateData.details as { tagline?: string } | undefined)?.tagline ??
-          ((template.details as { tagline?: string } | null)?.tagline ?? null),
+          (template.details as { tagline?: string } | null)?.tagline ??
+          null,
         requiredSetup: updateData.requiredCredentials ?? template.requiredCredentials ?? [],
         visibility,
         bumpVersion: true,

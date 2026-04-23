@@ -1,5 +1,5 @@
-import { notFound, redirect } from 'next/navigation'
 import type { Metadata } from 'next'
+import { notFound, redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth'
 import { canAccessTemplate } from '@/lib/templates/permissions'
 import { verifyWorkspaceMembership } from '@/app/api/workflows/utils'

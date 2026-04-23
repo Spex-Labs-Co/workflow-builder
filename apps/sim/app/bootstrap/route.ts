@@ -2,7 +2,7 @@ import { db } from '@sim/db'
 import { user } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { and, eq, ne, sql } from 'drizzle-orm'
-import { NextRequest, NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { env } from '@/lib/core/config/env'
 import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
@@ -99,7 +99,9 @@ async function upsertIdentityLink(
   `)
 }
 
-async function resolveBootstrapToken(bootstrapToken: string): Promise<SpexBootstrapResolveResponse> {
+async function resolveBootstrapToken(
+  bootstrapToken: string
+): Promise<SpexBootstrapResolveResponse> {
   if (!env.SPEX_API_BASE_URL || !env.SPEX_INTERNAL_API_KEY) {
     throw new Error('SPEX_API_BASE_URL and SPEX_INTERNAL_API_KEY must be configured')
   }
@@ -165,7 +167,12 @@ async function bootstrapSignIn(request: NextRequest, email: string, password: st
   })
 }
 
-async function bootstrapSignUp(request: NextRequest, email: string, password: string, name: string) {
+async function bootstrapSignUp(
+  request: NextRequest,
+  email: string,
+  password: string,
+  name: string
+) {
   const authHeaders = new Headers(request.headers)
   return auth.api.signUpEmail({
     headers: authHeaders,
@@ -194,14 +201,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=email-required', request.url))
     }
 
-    const fullName =
-      `${resolved.firstName || ''} ${resolved.lastName || ''}`.trim() || 'Spex User'
+    const fullName = `${resolved.firstName || ''} ${resolved.lastName || ''}`.trim() || 'Spex User'
     const password = buildDeterministicPassword(resolved.spexUserId)
     const existingLink = await getIdentityLink(resolved.spexUserId)
     const existingEmailUser = await findUserByEmail(resolved.email)
 
     if (!existingLink && existingEmailUser) {
-      throw new Error('Existing SIM account with same email requires migration before Spex bootstrap')
+      throw new Error(
+        'Existing SIM account with same email requires migration before Spex bootstrap'
+      )
     }
 
     let simUserId = existingLink?.sim_user_id || null

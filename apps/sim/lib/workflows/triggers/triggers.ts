@@ -608,7 +608,9 @@ export class TriggerUtils {
     issue: 'missing' | 'multiple'
   ): string {
     const triggerName =
-      triggerType === 'workflow' ? 'Spex AI' : triggerType.charAt(0).toUpperCase() + triggerType.slice(1)
+      triggerType === 'workflow'
+        ? 'Spex AI'
+        : triggerType.charAt(0).toUpperCase() + triggerType.slice(1)
 
     if (issue === 'missing') {
       return `${triggerName} execution requires a ${triggerName} Trigger block`

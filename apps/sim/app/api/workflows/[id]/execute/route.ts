@@ -121,9 +121,7 @@ export const dynamic = 'force-dynamic'
 
 const INLINE_TRIGGER_TYPES = new Set<CoreTriggerType>(['manual', 'workflow'])
 
-function toRuntimeWorkflowTriggerType(
-  triggerType: CoreTriggerType
-): 'api' | 'chat' | 'workflow' {
+function toRuntimeWorkflowTriggerType(triggerType: CoreTriggerType): 'api' | 'chat' | 'workflow' {
   if (triggerType === 'chat') {
     return 'chat'
   }
