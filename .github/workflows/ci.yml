@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches: [main, staging, dev, sim_v1]
   pull_request:
-    branches: [main, staging, dev]
+    branches: [main, staging, dev, sim_v1]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,6 +18,55 @@ jobs:
     name: Test and Build
     uses: ./.github/workflows/test-build.yml
     secrets: inherit
+
+  detect-spex-changes:
+    name: Detect Spex Deploy Changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/sim_v1'
+    runs-on: ubuntu-latest
+    outputs:
+      build_required: ${{ steps.filter.outputs.build }}
+      deploy_required: ${{ steps.set_flags.outputs.deploy_required }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            build:
+              - 'apps/**'
+              - 'docker/**'
+              - 'packages/**'
+              - 'bun.lock'
+              - 'package.json'
+            deploy_only:
+              - 'docker-compose.spex-prod.yml'
+
+      - id: set_flags
+        run: |
+          if [ "${{ steps.filter.outputs.build }}" = "true" ] || [ "${{ steps.filter.outputs.deploy_only }}" = "true" ]; then
+            echo "deploy_required=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_required=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-spex-images:
+    name: Build Spex Images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/sim_v1' && needs.detect-spex-changes.outputs.build_required == 'true'
+    needs: [test-build, detect-spex-changes]
+    uses: ./.github/workflows/images.yml
+    secrets: inherit
+
+  deploy-coolify:
+    name: Deploy to Coolify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/sim_v1' && always() && needs.detect-spex-changes.outputs.deploy_required == 'true' && needs.test-build.result == 'success' && (needs.build-spex-images.result == 'success' || needs.build-spex-images.result == 'skipped')
+    needs: [test-build, detect-spex-changes, build-spex-images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify deploy
+        run: curl -fsS -X POST "${{ secrets.COOLIFY_SIM_DEPLOY_WEBHOOK }}"
 
   # Detect if this is a version release commit (e.g., "v0.5.24: ...")
   detect-version:
@@ -44,108 +93,6 @@ jobs:
             echo "is_release=false" >> $GITHUB_OUTPUT
             echo "ℹ️ Not a release commit"
           fi
-
-  # Build AMD64 images and push to ECR immediately (+ GHCR for main)
-  build-amd64:
-    name: Build AMD64
-    needs: [detect-version]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/dev')
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: ./docker/app.Dockerfile
-            ghcr_image: ghcr.io/simstudioai/simstudio
-            ecr_repo_secret: ECR_APP
-          - dockerfile: ./docker/db.Dockerfile
-            ghcr_image: ghcr.io/simstudioai/migrations
-            ecr_repo_secret: ECR_MIGRATIONS
-          - dockerfile: ./docker/realtime.Dockerfile
-            ghcr_image: ghcr.io/simstudioai/realtime
-            ecr_repo_secret: ECR_REALTIME
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ github.ref == 'refs/heads/main' && secrets.AWS_ROLE_TO_ASSUME || github.ref == 'refs/heads/dev' && secrets.DEV_AWS_ROLE_TO_ASSUME || secrets.STAGING_AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ github.ref == 'refs/heads/main' && secrets.AWS_REGION || github.ref == 'refs/heads/dev' && secrets.DEV_AWS_REGION || secrets.STAGING_AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Login to GHCR
-        if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: useblacksmith/setup-docker-builder@v1
-
-      - name: Generate tags
-        id: meta
-        run: |
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          ECR_REPO="${{ secrets[matrix.ecr_repo_secret] }}"
-          GHCR_IMAGE="${{ matrix.ghcr_image }}"
-
-          # ECR tags (always build for ECR)
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            ECR_TAG="latest"
-          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
-            ECR_TAG="dev"
-          else
-            ECR_TAG="staging"
-          fi
-          ECR_IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${ECR_TAG}"
-
-          # Build tags list
-          TAGS="${ECR_IMAGE}"
-
-          # Add GHCR tags only for main branch
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            GHCR_AMD64="${GHCR_IMAGE}:latest-amd64"
-            GHCR_SHA="${GHCR_IMAGE}:${{ github.sha }}-amd64"
-            TAGS="${TAGS},$GHCR_AMD64,$GHCR_SHA"
-
-            # Add version tag if this is a release commit
-            if [ "${{ needs.detect-version.outputs.is_release }}" = "true" ]; then
-              VERSION="${{ needs.detect-version.outputs.version }}"
-              GHCR_VERSION="${GHCR_IMAGE}:${VERSION}-amd64"
-              TAGS="${TAGS},$GHCR_VERSION"
-              echo "📦 Adding version tag: ${VERSION}-amd64"
-            fi
-          fi
-
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-
-      - name: Build and push images
-        uses: useblacksmith/build-push-action@v2
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          provenance: false
-          sbom: false
 
   # Build ARM64 images for GHCR (main branch only, runs in parallel)
   build-ghcr-arm64:
@@ -211,7 +158,7 @@ jobs:
   create-ghcr-manifests:
     name: Create GHCR Manifests
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [build-amd64, build-ghcr-arm64, detect-version]
+    needs: [build-ghcr-arm64, detect-version]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       packages: write
@@ -234,26 +181,21 @@ jobs:
         run: |
           IMAGE_BASE="${{ matrix.image }}"
 
-          # Create latest manifest
-          docker manifest create "${IMAGE_BASE}:latest" \
-            "${IMAGE_BASE}:latest-amd64" \
+          docker buildx imagetools create \
+            -t "${IMAGE_BASE}:latest" \
             "${IMAGE_BASE}:latest-arm64"
-          docker manifest push "${IMAGE_BASE}:latest"
 
-          # Create SHA manifest
-          docker manifest create "${IMAGE_BASE}:${{ github.sha }}" \
-            "${IMAGE_BASE}:${{ github.sha }}-amd64" \
+          docker buildx imagetools create \
+            -t "${IMAGE_BASE}:${{ github.sha }}" \
             "${IMAGE_BASE}:${{ github.sha }}-arm64"
-          docker manifest push "${IMAGE_BASE}:${{ github.sha }}"
 
           # Create version manifest if this is a release commit
           if [ "${{ needs.detect-version.outputs.is_release }}" = "true" ]; then
             VERSION="${{ needs.detect-version.outputs.version }}"
             echo "📦 Creating version manifest: ${VERSION}"
-            docker manifest create "${IMAGE_BASE}:${VERSION}" \
-              "${IMAGE_BASE}:${VERSION}-amd64" \
+            docker buildx imagetools create \
+              -t "${IMAGE_BASE}:${VERSION}" \
               "${IMAGE_BASE}:${VERSION}-arm64"
-            docker manifest push "${IMAGE_BASE}:${VERSION}"
           fi
 
   # Check if docs changed
@@ -279,7 +221,7 @@ jobs:
   # Process docs embeddings (only when docs change, after ECR images are pushed)
   process-docs:
     name: Process Docs
-    needs: [build-amd64, check-docs-changes]
+    needs: [build-ghcr-arm64, check-docs-changes]
     if: needs.check-docs-changes.outputs.docs_changed == 'true'
     uses: ./.github/workflows/docs-embeddings.yml
     secrets: inherit
