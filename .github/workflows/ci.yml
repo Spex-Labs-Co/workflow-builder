@@ -56,6 +56,9 @@ jobs:
     name: Build Spex Images
     if: github.event_name == 'push' && github.ref == 'refs/heads/sim_v1' && needs.detect-spex-changes.outputs.build_required == 'true'
     needs: [test-build, detect-spex-changes]
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/images.yml
     secrets: inherit
 
