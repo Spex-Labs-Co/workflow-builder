@@ -1324,6 +1324,13 @@
       "when": 1776349000000,
       "tag": "0189_silent_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1776942620313,
+      "tag": "0190_left_carnage",
+      "breakpoints": true
     }
   ]
 }
