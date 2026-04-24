@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Coolify deploy
-        run: curl -fsS -X POST "${{ secrets.COOLIFY_SIM_DEPLOY_WEBHOOK }}"
+        run: curl --fail --show-error --request GET "${{ secrets.COOLIFY_SIM_DEPLOY_WEBHOOK }}" --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}"
 
   # Detect if this is a version release commit (e.g., "v0.5.24: ...")
   detect-version:
