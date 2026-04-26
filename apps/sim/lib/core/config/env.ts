@@ -30,10 +30,10 @@ export const env = createEnv({
     ENCRYPTION_KEY:                        z.string().min(32),                     // Key for encrypting sensitive data
     API_ENCRYPTION_KEY:                    z.string().min(32).optional(),          // Dedicated key for encrypting API keys (optional for OSS)
     INTERNAL_API_SECRET:                   z.string().min(32),                     // Secret for internal API authentication
-    SPEX_API_BASE_URL:                     z.string().url().optional(),            // Spex control-plane API base URL for SIM bootstrap
+    SPEX_API_BASE_URL:                     z.string().url().optional(),            // Spex control-plane API base URL for Spex auth and sync
     SPEX_FRONTEND_URL:                     z.string().url().optional(),            // Spex frontend URL used by SIM entry screens
-    SPEX_INTERNAL_API_KEY:                 z.string().min(1).optional(),           // Internal API key used to resolve Spex bootstrap tokens
-    SPEX_AUTH_ONLY:                        z.boolean().optional(),                 // Disable native SIM login UI and require Spex bootstrap entry
+    SPEX_INTERNAL_API_KEY:                 z.string().min(1).optional(),           // Internal API key used for Spex control-plane requests
+    SPEX_AUTH_ONLY:                        z.boolean().optional(),                 // Disable native SIM login UI and show the Spex email login flow
 
     // Copilot
     COPILOT_API_KEY:                       z.string().min(1).optional(),           // Secret for internal sim agent API authentication
