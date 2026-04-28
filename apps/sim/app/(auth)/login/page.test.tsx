@@ -24,7 +24,9 @@ vi.mock('@/app/(auth)/login/login-form', () => ({
 }))
 
 vi.mock('@/app/(auth)/login/spex-login-form', () => ({
-  default: () => <div data-testid='spex-login-form' />,
+  default: (props: { spexApiBaseUrl: string }) => (
+    <div data-testid='spex-login-form' data-spex-api-base-url={props.spexApiBaseUrl} />
+  ),
 }))
 
 afterEach(() => {
@@ -37,6 +39,7 @@ describe('LoginPage', () => {
     vi.doMock('@/lib/core/config/env', () => ({
       env: {
         SPEX_AUTH_ONLY: true,
+        SPEX_API_BASE_URL: 'https://store.spexlabs.co',
       },
     }))
 
@@ -45,6 +48,7 @@ describe('LoginPage', () => {
     const html = renderToStaticMarkup(await LoginPage())
 
     expect(html).toContain('data-testid="spex-login-form"')
+    expect(html).toContain('data-spex-api-base-url="https://store.spexlabs.co"')
     expect(mockGetOAuthProviderStatus).not.toHaveBeenCalled()
   })
 

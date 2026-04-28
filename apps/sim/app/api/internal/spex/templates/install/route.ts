@@ -17,7 +17,7 @@ import { deduplicateWorkflowName } from '@/lib/workflows/utils'
 import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
 
 const logger = createLogger('SpexTemplateInstallAPI')
-const PASSWORD_PREFIX = 'spex-bootstrap::'
+const PASSWORD_PREFIX = 'spex-email-login::'
 
 const InstallTemplateSchema = z.object({
   spexUserId: z.string().min(1),

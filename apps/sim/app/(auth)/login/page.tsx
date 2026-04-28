@@ -13,10 +13,14 @@ export const dynamic = 'force-dynamic'
 
 export default async function LoginPage() {
   if (env.SPEX_AUTH_ONLY) {
+    if (!env.SPEX_API_BASE_URL) {
+      throw new Error('SPEX_API_BASE_URL must be configured when SPEX_AUTH_ONLY is enabled')
+    }
+
     return (
       <AuthBackground className='dark font-[430] font-season text-white'>
         <div className='mx-auto flex min-h-screen max-w-xl items-center px-6 py-16'>
-          <SpexLoginForm />
+          <SpexLoginForm spexApiBaseUrl={env.SPEX_API_BASE_URL} />
         </div>
       </AuthBackground>
     )

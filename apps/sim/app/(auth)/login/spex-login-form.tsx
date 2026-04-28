@@ -7,7 +7,16 @@ import { AUTH_SUBMIT_BTN } from '@/app/(auth)/components/auth-button-classes'
 
 type Step = 'email' | 'otp'
 
-export default function SpexLoginForm() {
+type SpexLoginFormProps = {
+  spexApiBaseUrl: string
+}
+
+function getSpexOtpRequestUrl(spexApiBaseUrl: string) {
+  const baseUrl = spexApiBaseUrl.replace(/\/$/, '')
+  return `${baseUrl}/auth/sim/email/request-otp`
+}
+
+export default function SpexLoginForm({ spexApiBaseUrl }: SpexLoginFormProps) {
   const router = useRouter()
   const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState('')
@@ -23,7 +32,7 @@ export default function SpexLoginForm() {
     setMessage('')
 
     try {
-      const response = await fetch('/api/spex-auth/request-otp', {
+      const response = await fetch(getSpexOtpRequestUrl(spexApiBaseUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -128,13 +137,7 @@ export default function SpexLoginForm() {
       )}
 
       {message ? <p className='mt-4 text-emerald-300/85 text-sm'>{message}</p> : null}
-      {error ? (
-        <p className='mt-4 text-red-300/85 text-sm'>
-          {error.includes('not a Spex owner')
-            ? 'You are not a Spex owner. Purchase it from https://spexlabs.co'
-            : error}
-        </p>
-      ) : null}
+      {error ? <p className='mt-4 text-red-300/85 text-sm'>{error}</p> : null}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { auth } from '@/lib/auth'
 import { env } from '@/lib/core/config/env'
 import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
 
-const PASSWORD_PREFIX = 'spex-bootstrap::'
+const PASSWORD_PREFIX = 'spex-email-login::'
 
 export type SpexEmailLoginIdentity = {
   success: boolean
@@ -69,13 +69,6 @@ async function postToSpexInternal<T>(path: string, body: Record<string, unknown>
   }
 
   return payload as T
-}
-
-export async function requestSpexEmailOtp(email: string) {
-  return postToSpexInternal<{ success: boolean; message?: string }>(
-    '/auth/internal/sim/email/request-otp',
-    { email }
-  )
 }
 
 export async function verifySpexEmailOtp(email: string, otp: string) {
