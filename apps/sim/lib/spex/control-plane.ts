@@ -9,6 +9,38 @@ type SpexSyncResult = {
   attempted: boolean
   synced: boolean
   reason?: string
+  response?: unknown
+}
+
+export type SpexExecutionContext = {
+  spexUserId: string
+  installId?: string | null
+  runtimeSource?: string | null
+}
+
+export function extractSpexExecutionContext(input: unknown): SpexExecutionContext | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null
+  }
+
+  const rawContext = (input as Record<string, unknown>).spex_context
+  if (!rawContext || typeof rawContext !== 'object' || Array.isArray(rawContext)) {
+    return null
+  }
+
+  const spexUserId = String((rawContext as Record<string, unknown>).spexUserId || '').trim()
+  if (!spexUserId) {
+    return null
+  }
+
+  const installId = String((rawContext as Record<string, unknown>).installId || '').trim()
+  const runtimeSource = String((rawContext as Record<string, unknown>).runtimeSource || '').trim()
+
+  return {
+    spexUserId,
+    installId: installId || null,
+    runtimeSource: runtimeSource || null,
+  }
 }
 
 async function ensureIdentityTable() {
@@ -198,7 +230,7 @@ export async function reportSpexWorkflowCompletion(params: {
   simWorkflowId: string
   simUserId?: string | null
   runtimeSource?: string | null
-  status: 'completed' | 'error'
+  status: 'completed' | 'cancelled' | 'failed' | 'expired'
   outputSummary?: string | null
   output?: unknown
   error?: string | null
@@ -231,5 +263,79 @@ export async function reportSpexWorkflowCompletion(params: {
       error: error instanceof Error ? error.message : String(error),
     })
     return { attempted: true, synced: false, reason: 'completion-report-failed' }
+  }
+}
+
+export async function reportSpexWorkflowStarted(params: {
+  executionId: string
+  spexUserId: string
+  installId?: string | null
+  simWorkflowId: string
+  simUserId?: string | null
+  runtimeSource?: string | null
+}): Promise<SpexSyncResult> {
+  if (!isConfigured()) {
+    return { attempted: false, synced: false, reason: 'control-plane-not-configured' }
+  }
+
+  try {
+    const response = await postInternal('/sim/internal/executions/start', {
+      executionId: params.executionId,
+      spexUserId: params.spexUserId,
+      installId: params.installId ?? null,
+      simWorkflowId: params.simWorkflowId,
+      simUserId: params.simUserId ?? null,
+      runtimeSource: params.runtimeSource ?? null,
+    })
+
+    return { attempted: true, synced: true, response }
+  } catch (error) {
+    logger.error('Failed to report Spex workflow start', {
+      executionId: params.executionId,
+      simWorkflowId: params.simWorkflowId,
+      spexUserId: params.spexUserId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { attempted: true, synced: false, reason: 'start-report-failed' }
+  }
+}
+
+export async function reportSpexWorkflowOutput(params: {
+  executionId: string
+  spexUserId: string
+  installId?: string | null
+  simWorkflowId: string
+  runtimeSource?: string | null
+  text: string
+}): Promise<SpexSyncResult> {
+  if (!isConfigured()) {
+    return { attempted: false, synced: false, reason: 'control-plane-not-configured' }
+  }
+
+  try {
+    const response = await postInternal('/sim/internal/executions/output', {
+      executionId: params.executionId,
+      spexUserId: params.spexUserId,
+      installId: params.installId ?? null,
+      simWorkflowId: params.simWorkflowId,
+      runtimeSource: params.runtimeSource ?? null,
+      text: params.text,
+    })
+
+    const payload = response as { sent?: boolean; reason?: string }
+    return {
+      attempted: true,
+      synced: Boolean(payload.sent),
+      reason: payload.reason,
+      response,
+    }
+  } catch (error) {
+    logger.error('Failed to report Spex workflow output', {
+      executionId: params.executionId,
+      simWorkflowId: params.simWorkflowId,
+      spexUserId: params.spexUserId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { attempted: true, synced: false, reason: 'output-report-failed' }
   }
 }

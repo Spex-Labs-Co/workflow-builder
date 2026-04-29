@@ -6,7 +6,7 @@ import { generateId } from '@/lib/core/utils/uuid'
 import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import { buildTraceSpans } from '@/lib/logs/execution/trace-spans/trace-spans'
-import { reportSpexWorkflowCompletion } from '@/lib/spex/control-plane'
+import { extractSpexExecutionContext, reportSpexWorkflowCompletion } from '@/lib/spex/control-plane'
 import {
   executeWorkflowCore,
   wasExecutionFinalizedByCore,
@@ -19,36 +19,7 @@ import type { CoreTriggerType } from '@/stores/logs/filters/types'
 
 const logger = createLogger('TriggerWorkflowExecution')
 
-type SpexExecutionContext = {
-  spexUserId: string
-  installId?: string | null
-  runtimeSource?: string | null
-}
-
-function extractSpexExecutionContext(input: unknown): SpexExecutionContext | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return null
-  }
-
-  const rawContext = (input as Record<string, unknown>).spex_context
-  if (!rawContext || typeof rawContext !== 'object' || Array.isArray(rawContext)) {
-    return null
-  }
-
-  const spexUserId = String((rawContext as Record<string, unknown>).spexUserId || '').trim()
-  if (!spexUserId) {
-    return null
-  }
-
-  const installId = String((rawContext as Record<string, unknown>).installId || '').trim()
-  const runtimeSource = String((rawContext as Record<string, unknown>).runtimeSource || '').trim()
-
-  return {
-    spexUserId,
-    installId: installId || null,
-    runtimeSource: runtimeSource || null,
-  }
-}
+const SPEX_WORKFLOW_TIMEOUT_MS = 5 * 60 * 1000
 
 function summarizeOutput(output: unknown): string | null {
   if (typeof output === 'string' && output.trim()) {
@@ -165,6 +136,7 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       callChain: payload.callChain,
       correlation,
       executionMode: payload.executionMode ?? 'async',
+      spexContext: spexContext ?? undefined,
     }
 
     const snapshot = new ExecutionSnapshot(
@@ -175,7 +147,12 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
       []
     )
 
-    const timeoutController = createTimeoutAbortController(preprocessResult.executionTimeout?.async)
+    const asyncTimeoutMs = preprocessResult.executionTimeout?.async
+    const timeoutController = createTimeoutAbortController(
+      spexContext
+        ? Math.min(asyncTimeoutMs ?? SPEX_WORKFLOW_TIMEOUT_MS, SPEX_WORKFLOW_TIMEOUT_MS)
+        : asyncTimeoutMs
+    )
 
     let result
     try {
@@ -214,6 +191,15 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
     })
 
     if (triggerType === 'workflow' && spexContext) {
+      const terminalStatus =
+        result.status === 'cancelled' && timeoutController.isTimedOut()
+          ? 'expired'
+          : result.status === 'cancelled'
+            ? 'cancelled'
+            : result.success
+              ? 'completed'
+              : 'failed'
+
       await reportSpexWorkflowCompletion({
         executionId,
         spexUserId: spexContext.spexUserId,
@@ -221,7 +207,7 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
         simWorkflowId: workflowId,
         simUserId: actorUserId,
         runtimeSource: spexContext.runtimeSource ?? null,
-        status: result.success ? 'completed' : 'error',
+        status: terminalStatus,
         outputSummary: summarizeOutput(result.output),
         output: result.output,
         error: result.success ? null : (result.error ?? null),
@@ -265,7 +251,7 @@ export async function executeWorkflowJob(payload: WorkflowExecutionPayload) {
         simWorkflowId: workflowId,
         simUserId: payload.userId,
         runtimeSource: spexContext.runtimeSource ?? null,
-        status: 'error',
+        status: 'failed',
         outputSummary: null,
         output: executionResult?.output ?? null,
         error: executionResult?.error ?? (error instanceof Error ? error.message : String(error)),

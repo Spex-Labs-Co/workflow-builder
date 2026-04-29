@@ -2262,6 +2262,7 @@ import {
 } from '@/tools/slack'
 import { smsSendTool } from '@/tools/sms'
 import { smtpSendMailTool } from '@/tools/smtp'
+import { spexOutputTool } from '@/tools/spex'
 import {
   spotifyAddPlaylistCoverTool,
   spotifyAddToQueueTool,
@@ -5296,6 +5297,7 @@ export const tools: Record<string, ToolConfig> = {
   spotify_set_repeat: spotifySetRepeatTool,
   spotify_set_shuffle: spotifySetShuffleTool,
   spotify_transfer_playback: spotifyTransferPlaybackTool,
+  spex_output: spexOutputTool,
   upstash_redis_get: upstashRedisGetTool,
   upstash_redis_set: upstashRedisSetTool,
   upstash_redis_delete: upstashRedisDeleteTool,

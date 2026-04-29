@@ -176,6 +176,7 @@ import { SimilarwebBlock } from '@/blocks/blocks/similarweb'
 import { SixtyfourBlock } from '@/blocks/blocks/sixtyfour'
 import { SlackBlock } from '@/blocks/blocks/slack'
 import { SmtpBlock } from '@/blocks/blocks/smtp'
+import { SpexOutputBlock } from '@/blocks/blocks/spex_output'
 import { SpexTriggerBlock } from '@/blocks/blocks/spex_trigger'
 import { SpotifyBlock } from '@/blocks/blocks/spotify'
 import { SQSBlock } from '@/blocks/blocks/sqs'
@@ -417,6 +418,7 @@ export const registry: Record<string, BlockConfig> = {
   sixtyfour: SixtyfourBlock,
   slack: SlackBlock,
   smtp: SmtpBlock,
+  spex_output: SpexOutputBlock,
   spotify: SpotifyBlock,
   spex_trigger: SpexTriggerBlock,
   secrets_manager: SecretsManagerBlock,

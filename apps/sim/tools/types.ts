@@ -1,5 +1,6 @@
 import type { HostedKeyRateLimitConfig } from '@/lib/core/rate-limiter'
 import type { OAuthService } from '@/lib/oauth'
+import type { SpexExecutionContext } from '@/lib/spex/control-plane'
 
 export type BYOKProviderId =
   | 'openai'
@@ -28,6 +29,7 @@ export type WorkflowToolExecutionContext = {
   workflowId?: string
   executionId?: string
   userId?: string
+  spexContext?: SpexExecutionContext
 }
 
 export type OutputType =

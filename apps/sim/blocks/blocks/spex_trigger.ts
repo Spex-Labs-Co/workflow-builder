@@ -12,11 +12,11 @@ export const SpexTriggerBlock: BlockConfig = {
   name: 'Spex AI',
   description: 'Run this workflow when Spex AI decides to invoke it.',
   longDescription:
-    'Use the Spex AI trigger for workflows that should appear as installable Spex apps/plugins. Define the tool guidance, execution mode, and structured inputs expected from the Spex runtimes.',
+    'Use the Spex AI trigger for workflows that should appear as installable Spex apps/plugins. Define the tool guidance and structured inputs expected from the Spex runtimes.',
   bestPractices: `
   - Write a precise tool prompt so the agent knows when this workflow should be used.
   - Keep the input format minimal and stable; installed copies depend on these field names.
-  - Prefer "Short running" for inline answers. Mark it "Long running" only when the workflow may need async delivery later.
+  - Use Spex Output nodes for every progress update or final message the user should hear.
   `,
   category: 'triggers',
   bgColor: '#0F766E',
@@ -29,20 +29,6 @@ export const SpexTriggerBlock: BlockConfig = {
       placeholder: 'Explain when Spex AI should call this workflow and what it helps the user do.',
       description:
         'Shown to Spex runtimes so they know when this workflow is relevant for the user.',
-      required: true,
-      mode: 'trigger',
-    },
-    {
-      id: 'executionMode',
-      title: 'Execution mode',
-      type: 'dropdown',
-      options: [
-        { label: 'Short running', id: 'sync' },
-        { label: 'Long running', id: 'async' },
-      ],
-      value: () => 'sync',
-      description:
-        'Use short running for inline responses. Long running is for tasks that may complete later.',
       required: true,
       mode: 'trigger',
     },

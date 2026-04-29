@@ -36,6 +36,11 @@ import {
 import { preprocessExecution } from '@/lib/execution/preprocessing'
 import { LoggingSession } from '@/lib/logs/execution/logging-session'
 import {
+  extractSpexExecutionContext,
+  reportSpexWorkflowCompletion,
+  reportSpexWorkflowStarted,
+} from '@/lib/spex/control-plane'
+import {
   cleanupExecutionBase64Cache,
   hydrateUserFilesWithBase64,
 } from '@/lib/uploads/utils/user-file-base64.server'
@@ -226,8 +231,20 @@ async function handleAsyncExecution(params: AsyncExecutionParams): Promise<NextR
     callChain,
     executionMode: 'async',
   }
+  const spexContext = triggerType === 'workflow' ? extractSpexExecutionContext(input) : null
 
   try {
+    if (spexContext) {
+      await reportSpexWorkflowStarted({
+        executionId,
+        spexUserId: spexContext.spexUserId,
+        installId: spexContext.installId ?? null,
+        simWorkflowId: workflowId,
+        simUserId: userId,
+        runtimeSource: spexContext.runtimeSource ?? null,
+      })
+    }
+
     const useBullMQ = shouldUseBullMQ()
     const jobQueue = useBullMQ ? null : await getJobQueue()
     const jobId = useBullMQ
@@ -294,6 +311,21 @@ async function handleAsyncExecution(params: AsyncExecutionParams): Promise<NextR
       { status: 202 }
     )
   } catch (error: any) {
+    if (spexContext) {
+      await reportSpexWorkflowCompletion({
+        executionId,
+        spexUserId: spexContext.spexUserId,
+        installId: spexContext.installId ?? null,
+        simWorkflowId: workflowId,
+        simUserId: userId,
+        runtimeSource: spexContext.runtimeSource ?? null,
+        status: 'failed',
+        outputSummary: null,
+        output: null,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+
     if (error instanceof DispatchQueueFullError) {
       return NextResponse.json(
         {

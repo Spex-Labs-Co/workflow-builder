@@ -1,5 +1,6 @@
 import type { TraceSpan } from '@/lib/logs/types'
 import type { PermissionGroupConfig } from '@/lib/permission-groups/types'
+import type { SpexExecutionContext } from '@/lib/spex/control-plane'
 import type { BlockOutput } from '@/blocks/types'
 import type {
   ChildWorkflowContext,
@@ -162,6 +163,7 @@ export interface ExecutionMetadata {
   triggerBlockId?: string
   useDraftState?: boolean
   resumeFromSnapshot?: boolean
+  spexContext?: SpexExecutionContext
 }
 
 export interface BlockState {
