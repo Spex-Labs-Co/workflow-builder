@@ -382,3 +382,58 @@ Register in `triggers/registry.ts`.
 - [ ] (Optional) Create and register triggers
 - [ ] (If file uploads) Create internal API route with `downloadFileFromStorage`
 - [ ] (If file uploads) Use `normalizeFileInput` in block config
+
+## Spex Fork — Upstream Merge Guide
+
+This repo is a Spex fork of the open-source [Sim](https://github.com/simstudioai/sim) workflow builder. The working branch is `sim_v1`. Upstream is tracked as the `upstream` remote.
+
+### Pulling upstream changes
+
+```bash
+git remote add upstream https://github.com/simstudioai/sim.git  # one-time
+git fetch upstream
+git rebase upstream/main sim_v1
+# resolve conflicts in the 5 hotspot files below
+cd packages/db && bunx drizzle-kit generate   # must print "No schema changes"
+bunx biome format --write <any file you touched>
+git push spex-builder sim_v1 --force-with-lease
+```
+
+Do this every **2–4 weeks**. Longer gaps make conflicts compound.
+
+### Files that need manual review on every upstream pull
+
+These 5 files are modified by both Spex and upstream — inspect them after every rebase:
+
+| File | What Spex added | Upstream change frequency |
+|---|---|---|
+| `apps/sim/proxy.ts` | `BLOCKED_NATIVE_AUTH_PATHS` constant + `SPEX_AUTH_ONLY` guard at the top of `proxy()` | High — touched for analytics, CSP, auth redirects |
+| `packages/db/schema.ts` | `visibility` column on `templates` table; `spexIdentityLink` table appended at EOF | High — new features constantly add columns/tables |
+| `apps/sim/lib/workflows/triggers/triggers.ts` | `SPEX` trigger type, `'workflow'` execution kind, classification logic | Low–medium — changes when new trigger types land |
+| `apps/sim/lib/core/config/env.ts` | 4 `SPEX_*` env vars appended at end of object | Medium — every new feature adds vars |
+| `.github/workflows/ci.yml` | `sim_v1` branch in push triggers; `detect-spex-changes`, `build-spex-images`, `deploy-coolify` jobs | Low — structural CI refactors are rare |
+
+### Files that are entirely Spex-owned (never conflict)
+
+These directories/files are not in upstream — they auto-merge forever:
+
+- `apps/sim/lib/spex/` — OTP login, identity linking, control-plane client
+- `apps/sim/app/api/internal/spex/` — install/update endpoints
+- `apps/sim/app/api/spex-auth/` — OTP verify route
+- `apps/sim/blocks/blocks/spex_trigger.ts` — Spex trigger block
+- `docker-compose.spex-prod.yml` — Spex production deployment
+- `packages/db/migrations/0189–0191` and `spexIdentityLink` table — Spex-specific DB objects
+
+### Lint & format rules (always run before committing)
+
+- **Biome format every file you touch:** `bunx biome format --write <file>` — CI runs `biome check` and will fail on any formatting diff
+- **Schema sync check:** after any `schema.ts` edit, run `cd packages/db && bunx drizzle-kit generate` — must print `No schema changes, nothing to migrate`; if it generates a new migration, commit it with its snapshot JSON
+
+### Spex-specific environment variables
+
+| Variable | Purpose |
+|---|---|
+| `SPEX_AUTH_ONLY=true` | Disables native SIM login; only Spex OTP flow works |
+| `SPEX_API_BASE_URL` | Spex backend base URL (used in CSP connect-src and OTP calls) |
+| `SPEX_INTERNAL_API_KEY` | Shared secret for internal Spex→SIM API calls |
+| `BETTER_AUTH_SECRET` | **⚠ Never rotate** without a full Spex user re-key — Spex derives deterministic passwords from this secret; rotating it invalidates every Spex user's SIM session |
