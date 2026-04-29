@@ -119,7 +119,10 @@ function applyPreservedCredentials(
 
     for (const [subId, value] of Object.entries(preserved)) {
       if (block.subBlocks?.[subId] !== undefined) {
-        block.subBlocks[subId] = { ...block.subBlocks[subId], value }
+        block.subBlocks[subId] = {
+          ...block.subBlocks[subId],
+          value: value as string | number | string[][] | null,
+        }
       }
     }
   }
