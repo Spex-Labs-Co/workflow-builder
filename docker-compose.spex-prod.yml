@@ -1,6 +1,7 @@
 services:
   simstudio:
     image: ghcr.io/spex-labs-co/workflow-builder-simstudio:latest
+    pull_policy: always
     ports:
       - '3000:3000'
     deploy:
@@ -45,6 +46,7 @@ services:
 
   sim-worker:
     image: ghcr.io/spex-labs-co/workflow-builder-sim-worker:latest
+    pull_policy: always
     command: ['bun', 'apps/sim/worker/index.ts']
     deploy:
       resources:
@@ -83,6 +85,7 @@ services:
 
   realtime:
     image: ghcr.io/spex-labs-co/workflow-builder-realtime:latest
+    pull_policy: always
     ports:
       - '3002:3002'
     deploy:
@@ -109,6 +112,7 @@ services:
 
   migrations:
     image: ghcr.io/spex-labs-co/workflow-builder-migrations:latest
+    pull_policy: always
     working_dir: /app/packages/db
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-simstudio}
