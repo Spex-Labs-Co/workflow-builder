@@ -1,5 +1,5 @@
 import { db } from '@sim/db'
-import { templates, workflow } from '@sim/db/schema'
+import { templates, workflow, workflowBlocks } from '@sim/db/schema'
 import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
@@ -12,6 +12,12 @@ import type { RegenerateStateInput } from '@/lib/workflows/persistence/utils'
 import { regenerateWorkflowStateIds } from '@/lib/workflows/persistence/utils'
 
 const logger = createLogger('SpexInstallUpdateAPI')
+
+/**
+ * Subblock IDs that hold credential references.
+ * These values are user-filled and must be preserved across template updates.
+ */
+const CREDENTIAL_SUBBLOCK_IDS = new Set(['credential', 'triggerCredentials'])
 
 const UpdateInstallSchema = z.object({
   simUserId: z.string().min(1),
@@ -54,6 +60,71 @@ function remapTemplateVariables(
   return mapped
 }
 
+/**
+ * Builds a map of blockType → credential subblock values from the currently installed workflow.
+ * Only includes block types that appear exactly once (to avoid ambiguous matching).
+ */
+async function buildCredentialPreservationMap(
+  workflowId: string
+): Promise<Map<string, Record<string, unknown>>> {
+  const currentBlocks = await db
+    .select({ type: workflowBlocks.type, subBlocks: workflowBlocks.subBlocks })
+    .from(workflowBlocks)
+    .where(eq(workflowBlocks.workflowId, workflowId))
+
+  const typeCount = new Map<string, number>()
+  for (const block of currentBlocks) {
+    typeCount.set(block.type, (typeCount.get(block.type) ?? 0) + 1)
+  }
+
+  const credentialsByType = new Map<string, Record<string, unknown>>()
+  for (const block of currentBlocks) {
+    if ((typeCount.get(block.type) ?? 0) > 1) continue
+
+    const subBlocks = (block.subBlocks ?? {}) as Record<string, { value?: unknown }>
+    const creds: Record<string, unknown> = {}
+    for (const [subId, sub] of Object.entries(subBlocks)) {
+      if (CREDENTIAL_SUBBLOCK_IDS.has(subId) && sub?.value) {
+        creds[subId] = sub.value
+      }
+    }
+    if (Object.keys(creds).length > 0) {
+      credentialsByType.set(block.type, creds)
+    }
+  }
+
+  return credentialsByType
+}
+
+/**
+ * Applies preserved credential values from the old workflow state into the newly regenerated
+ * template state. Matches blocks by type — skips ambiguous types (multiple blocks of same type).
+ */
+function applyPreservedCredentials(
+  regeneratedState: ReturnType<typeof regenerateWorkflowStateIds>,
+  credentialsByType: Map<string, Record<string, unknown>>
+): void {
+  if (credentialsByType.size === 0) return
+
+  const newTypeCount = new Map<string, number>()
+  for (const block of Object.values(regeneratedState.blocks)) {
+    newTypeCount.set(block.type, (newTypeCount.get(block.type) ?? 0) + 1)
+  }
+
+  for (const block of Object.values(regeneratedState.blocks)) {
+    if ((newTypeCount.get(block.type) ?? 0) > 1) continue
+
+    const preserved = credentialsByType.get(block.type)
+    if (!preserved) continue
+
+    for (const [subId, value] of Object.entries(preserved)) {
+      if (block.subBlocks?.[subId] !== undefined) {
+        block.subBlocks[subId] = { ...block.subBlocks[subId], value }
+      }
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   const authResult = checkInternalApiKey(request)
   if (!authResult.success) {
@@ -64,16 +135,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { simUserId, simWorkflowId, simTemplateId } = UpdateInstallSchema.parse(body)
 
-    const templateRows = await db
-      .select({
-        id: templates.id,
-        state: templates.state,
-        details: templates.details,
-        requiredCredentials: templates.requiredCredentials,
-      })
-      .from(templates)
-      .where(eq(templates.id, simTemplateId))
-      .limit(1)
+    const [templateRows, credentialsByType] = await Promise.all([
+      db
+        .select({
+          id: templates.id,
+          state: templates.state,
+          details: templates.details,
+          requiredCredentials: templates.requiredCredentials,
+        })
+        .from(templates)
+        .where(eq(templates.id, simTemplateId))
+        .limit(1),
+      buildCredentialPreservationMap(simWorkflowId),
+    ])
 
     const template = templateRows[0]
     if (!template) {
@@ -81,6 +155,8 @@ export async function POST(request: NextRequest) {
     }
 
     const regeneratedState = regenerateWorkflowStateIds(template.state as RegenerateStateInput)
+    applyPreservedCredentials(regeneratedState, credentialsByType)
+
     const variables = remapTemplateVariables(
       template.state as Record<string, unknown>,
       simWorkflowId

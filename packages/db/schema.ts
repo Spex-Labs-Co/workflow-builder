@@ -2924,3 +2924,30 @@ export const academyCertificate = pgTable(
     statusIdx: index('academy_certificate_status_idx').on(table.status),
   })
 )
+
+/**
+ * Maps a Spex user identity to a SIM user account.
+ * Created once on first Spex login and never deleted.
+ *
+ * @warning BETTER_AUTH_SECRET is used to derive the SIM password for each Spex user.
+ *   This secret must never be rotated without first re-deriving and updating all passwords.
+ *   There is no automated re-key path — coordinate with the Spex backend before rotation.
+ */
+export const spexIdentityLink = pgTable(
+  'spex_identity_link',
+  {
+    spexUserId: text('spex_user_id').primaryKey(),
+    simUserId: text('sim_user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    defaultWorkspaceId: text('default_workspace_id').references(() => workspace.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    simUserIdIdx: index('spex_identity_link_sim_user_id_idx').on(table.simUserId),
+  })
+)

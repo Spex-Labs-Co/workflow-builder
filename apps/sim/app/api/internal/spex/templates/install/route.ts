@@ -7,17 +7,16 @@ import { z } from 'zod'
 import { auth } from '@/lib/auth'
 import { generateInternalToken } from '@/lib/auth/internal'
 import { checkInternalApiKey } from '@/lib/copilot/utils'
-import { env } from '@/lib/core/config/env'
 import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { generateId } from '@/lib/core/utils/uuid'
 import { syncSpexTemplateInstall } from '@/lib/spex/control-plane'
+import { buildDeterministicPassword } from '@/lib/spex/email-login'
 import type { RegenerateStateInput } from '@/lib/workflows/persistence/utils'
 import { regenerateWorkflowStateIds } from '@/lib/workflows/persistence/utils'
 import { deduplicateWorkflowName } from '@/lib/workflows/utils'
 import { ensureDefaultWorkspaceForUser } from '@/lib/workspaces/default-workspace'
 
 const logger = createLogger('SpexTemplateInstallAPI')
-const PASSWORD_PREFIX = 'spex-email-login::'
 
 const InstallTemplateSchema = z.object({
   spexUserId: z.string().min(1),
@@ -26,12 +25,6 @@ const InstallTemplateSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
 })
-
-function buildDeterministicPassword(spexUserId: string) {
-  const source = `${PASSWORD_PREFIX}${spexUserId}::${env.BETTER_AUTH_SECRET}`
-  const encoded = Buffer.from(source).toString('base64url')
-  return `${encoded.slice(0, 48)}Aa1!`
-}
 
 function normalizeSetupStatus(requiredCredentials: unknown): 'ready' | 'needs_setup' {
   if (Array.isArray(requiredCredentials)) {
@@ -66,18 +59,6 @@ function remapTemplateVariables(
     }
   }
   return mapped
-}
-
-async function ensureIdentityTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS spex_identity_link (
-      spex_user_id text PRIMARY KEY,
-      sim_user_id text NOT NULL UNIQUE REFERENCES "user"(id) ON DELETE CASCADE,
-      default_workspace_id text REFERENCES workspace(id) ON DELETE SET NULL,
-      created_at timestamp NOT NULL DEFAULT NOW(),
-      updated_at timestamp NOT NULL DEFAULT NOW()
-    )
-  `)
 }
 
 async function getIdentityLink(spexUserId: string) {
@@ -132,8 +113,6 @@ async function upsertIdentityLink(
 }
 
 async function resolveDefaultWorkspace(simUserId: string, spexUserId: string) {
-  await ensureIdentityTable()
-
   const identity = await getIdentityLink(spexUserId)
   if (!identity || identity.sim_user_id !== simUserId) {
     return null
@@ -180,8 +159,6 @@ async function ensureMappedSimUser({
   email: string
   fullName: string
 }) {
-  await ensureIdentityTable()
-
   const existingIdentity = await getIdentityLink(spexUserId)
   if (existingIdentity?.sim_user_id) {
     await synchronizeMappedUser(existingIdentity.sim_user_id, email, fullName)
@@ -224,8 +201,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { spexUserId, simTemplateId, email, firstName, lastName } =
       InstallTemplateSchema.parse(body)
-
-    await ensureIdentityTable()
 
     const fullName = `${firstName || ''} ${lastName || ''}`.trim() || 'Spex User'
 

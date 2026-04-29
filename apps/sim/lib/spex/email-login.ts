@@ -30,7 +30,14 @@ export function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
-function buildDeterministicPassword(spexUserId: string) {
+/**
+ * Derives a deterministic SIM password from the Spex user ID.
+ *
+ * @warning This derivation depends on `BETTER_AUTH_SECRET`. Rotating that secret
+ *   invalidates every Spex user's SIM session. There is no automated re-key path —
+ *   coordinate with the Spex backend before any rotation.
+ */
+export function buildDeterministicPassword(spexUserId: string) {
   const source = `${PASSWORD_PREFIX}${spexUserId}::${env.BETTER_AUTH_SECRET}`
   const encoded = Buffer.from(source).toString('base64url')
   return `${encoded.slice(0, 48)}Aa1!`
@@ -76,18 +83,6 @@ export async function verifySpexEmailOtp(email: string, otp: string) {
     email,
     otp,
   })
-}
-
-async function ensureIdentityTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS spex_identity_link (
-      spex_user_id text PRIMARY KEY,
-      sim_user_id text NOT NULL UNIQUE REFERENCES "user"(id) ON DELETE CASCADE,
-      default_workspace_id text REFERENCES workspace(id) ON DELETE SET NULL,
-      created_at timestamp NOT NULL DEFAULT NOW(),
-      updated_at timestamp NOT NULL DEFAULT NOW()
-    )
-  `)
 }
 
 async function getIdentityLink(spexUserId: string) {
@@ -173,8 +168,6 @@ async function signUpWithSpexPassword(
 }
 
 export async function createSpexSimSession(request: NextRequest, identity: SpexEmailLoginIdentity) {
-  await ensureIdentityTable()
-
   const email = normalizeEmail(identity.email)
   const fullName = `${identity.firstName || ''} ${identity.lastName || ''}`.trim() || 'Spex User'
   const password = buildDeterministicPassword(identity.spexUserId)
