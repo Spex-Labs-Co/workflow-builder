@@ -8,6 +8,19 @@ import { getClientIp } from './lib/core/utils/request'
 
 const logger = createLogger('Proxy')
 
+/**
+ * Native credential routes that are blocked in Spex-only deployments.
+ * Session reads, sign-out, and OAuth token exchanges are intentionally not blocked.
+ */
+const BLOCKED_NATIVE_AUTH_PATHS = new Set([
+  '/api/auth/sign-up/email',
+  '/api/auth/sign-in/email',
+  '/api/auth/sign-in/social',
+  '/api/auth/sign-in/magic-link',
+  '/api/auth/forget-password',
+  '/api/auth/reset-password',
+])
+
 const SUSPICIOUS_UA_PATTERNS = [
   /^\s*$/, // Empty user agents
   /\.\./, // Path traversal attempt
@@ -141,6 +154,17 @@ function handleSecurityFiltering(request: NextRequest): NextResponse | null {
 
 export async function proxy(request: NextRequest) {
   const url = request.nextUrl
+
+  // Block native credential auth routes when running as a Spex-only deployment.
+  if (
+    process.env.SPEX_AUTH_ONLY === 'true' &&
+    BLOCKED_NATIVE_AUTH_PATHS.has(url.pathname)
+  ) {
+    return NextResponse.json(
+      { error: 'Native authentication is disabled. Please use Spex login.' },
+      { status: 403 }
+    )
+  }
 
   const sessionCookie = getSessionCookie(request)
   const hasActiveSession = isAuthDisabled || !!sessionCookie
