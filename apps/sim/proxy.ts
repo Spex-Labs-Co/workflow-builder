@@ -156,10 +156,7 @@ export async function proxy(request: NextRequest) {
   const url = request.nextUrl
 
   // Block native credential auth routes when running as a Spex-only deployment.
-  if (
-    process.env.SPEX_AUTH_ONLY === 'true' &&
-    BLOCKED_NATIVE_AUTH_PATHS.has(url.pathname)
-  ) {
+  if (process.env.SPEX_AUTH_ONLY === 'true' && BLOCKED_NATIVE_AUTH_PATHS.has(url.pathname)) {
     return NextResponse.json(
       { error: 'Native authentication is disabled. Please use Spex login.' },
       { status: 403 }
