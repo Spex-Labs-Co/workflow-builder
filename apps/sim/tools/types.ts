@@ -1,6 +1,6 @@
 import type { HostedKeyRateLimitConfig } from '@/lib/core/rate-limiter'
 import type { OAuthService } from '@/lib/oauth'
-import type { SpexExecutionContext } from '@/lib/spex/control-plane'
+import type { SpexExecutionContext } from '@/lib/spex/types'
 
 export type BYOKProviderId =
   | 'openai'

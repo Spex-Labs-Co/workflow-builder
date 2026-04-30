@@ -2,6 +2,9 @@ import { db } from '@sim/db'
 import { createLogger } from '@sim/logger'
 import { sql } from 'drizzle-orm'
 import { env } from '@/lib/core/config/env'
+import type { SpexExecutionContext } from '@/lib/spex/types'
+
+export type { SpexExecutionContext }
 
 const logger = createLogger('SpexControlPlane')
 
@@ -10,12 +13,6 @@ type SpexSyncResult = {
   synced: boolean
   reason?: string
   response?: unknown
-}
-
-export type SpexExecutionContext = {
-  spexUserId: string
-  installId?: string | null
-  runtimeSource?: string | null
 }
 
 export function extractSpexExecutionContext(input: unknown): SpexExecutionContext | null {

@@ -1,6 +1,6 @@
 import type { Edge } from 'reactflow'
 import type { AsyncExecutionCorrelation } from '@/lib/core/async-jobs/types'
-import type { SpexExecutionContext } from '@/lib/spex/control-plane'
+import type { SpexExecutionContext } from '@/lib/spex/types'
 import type { NodeMetadata } from '@/executor/dag/types'
 import type {
   BlockLog,

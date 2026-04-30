@@ -23,6 +23,9 @@ export const SUBBLOCK_ID_MIGRATIONS: Record<string, Record<string, string>> = {
   knowledge: {
     knowledgeBaseId: 'knowledgeBaseSelector',
   },
+  spex_trigger: {
+    executionMode: '_removed_executionMode',
+  },
   ashby: {
     emailType: '_removed_emailType',
     phoneType: '_removed_phoneType',

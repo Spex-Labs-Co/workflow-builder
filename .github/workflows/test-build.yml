@@ -91,6 +91,8 @@ jobs:
           echo "✅ All feature flags are properly configured"
 
       - name: Check subblock ID stability
+        env:
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/simstudio'
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_REF="origin/${{ github.base_ref }}"

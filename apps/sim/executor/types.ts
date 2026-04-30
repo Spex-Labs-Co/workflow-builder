@@ -1,6 +1,6 @@
 import type { TraceSpan } from '@/lib/logs/types'
 import type { PermissionGroupConfig } from '@/lib/permission-groups/types'
-import type { SpexExecutionContext } from '@/lib/spex/control-plane'
+import type { SpexExecutionContext } from '@/lib/spex/types'
 import type { BlockOutput } from '@/blocks/types'
 import type {
   ChildWorkflowContext,
