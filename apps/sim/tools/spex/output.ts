@@ -1,4 +1,3 @@
-import { reportSpexWorkflowOutput } from '@/lib/spex/control-plane'
 import type { ToolConfig, ToolResponse, WorkflowToolExecutionContext } from '@/tools/types'
 
 type SpexOutputParams = {
@@ -41,6 +40,10 @@ export const spexOutputTool: ToolConfig<SpexOutputParams, ToolResponse> = {
   },
 
   directExecution: async (params) => {
+    if (typeof window !== 'undefined') {
+      return result({ sent: false, reason: 'server_only', text: String(params.text || '').trim() })
+    }
+
     const text = String(params.text || '').trim()
     if (!text) {
       return result({ sent: false, reason: 'empty_text', text: '' })
@@ -52,6 +55,7 @@ export const spexOutputTool: ToolConfig<SpexOutputParams, ToolResponse> = {
       return result({ sent: false, reason: 'missing_spex_context', text })
     }
 
+    const { reportSpexWorkflowOutput } = await import('@/lib/spex/control-plane')
     const response = await reportSpexWorkflowOutput({
       executionId: context.executionId,
       spexUserId: spexContext.spexUserId,
