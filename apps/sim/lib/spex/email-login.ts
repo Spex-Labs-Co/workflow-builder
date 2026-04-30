@@ -16,6 +16,11 @@ export type SpexEmailLoginIdentity = {
   lastName?: string | null
 }
 
+export type SpexBootstrapIdentity = SpexEmailLoginIdentity & {
+  redirectPath?: string | null
+  simLoginAllowed?: boolean
+}
+
 export function normalizeEmail(email: unknown) {
   return String(email || '')
     .trim()
@@ -82,6 +87,12 @@ export async function verifySpexEmailOtp(email: string, otp: string) {
   return postToSpexInternal<SpexEmailLoginIdentity>('/auth/internal/sim/email/verify-otp', {
     email,
     otp,
+  })
+}
+
+export async function resolveSpexBootstrapToken(bootstrapToken: string) {
+  return postToSpexInternal<SpexBootstrapIdentity>('/auth/internal/sim/bootstrap/resolve', {
+    bootstrapToken,
   })
 }
 
