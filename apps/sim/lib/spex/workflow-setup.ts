@@ -1,5 +1,3 @@
-import { getBlock } from '@/blocks/registry'
-import { AuthMode, type SubBlockConfig } from '@/blocks/types'
 import {
   buildCanonicalIndex,
   buildSubBlockValues,
@@ -9,6 +7,8 @@ import {
   isSubBlockVisibleForMode,
   type SubBlockCondition,
 } from '@/lib/workflows/subblocks/visibility'
+import { getBlock } from '@/blocks/registry'
+import { AuthMode, type SubBlockConfig } from '@/blocks/types'
 
 type WorkflowBlockRecord = {
   id: string

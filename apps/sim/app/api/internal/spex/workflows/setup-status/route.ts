@@ -1,6 +1,6 @@
 import { db } from '@sim/db'
 import { workflow, workflowBlocks } from '@sim/db/schema'
-import { and, eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkInternalApiKey } from '@/lib/copilot/utils'
@@ -43,9 +43,7 @@ export async function POST(request: NextRequest) {
     const allowedWorkflowIds = new Set(
       workflowRows
         .filter((row) =>
-          workflows.some(
-            (item) => item.simWorkflowId === row.id && item.simUserId === row.userId
-          )
+          workflows.some((item) => item.simWorkflowId === row.id && item.simUserId === row.userId)
         )
         .map((row) => row.id)
     )
