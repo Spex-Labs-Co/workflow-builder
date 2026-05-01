@@ -1,11 +1,11 @@
 import {
   buildCanonicalIndex,
   buildSubBlockValues,
+  type CanonicalModeOverrides,
   evaluateSubBlockCondition,
   hasAdvancedValues,
   isSubBlockFeatureEnabled,
   isSubBlockVisibleForMode,
-  type CanonicalModeOverrides,
   type SubBlockCondition,
 } from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks/registry'
