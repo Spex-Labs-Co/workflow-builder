@@ -8,6 +8,7 @@ import { AuditAction, AuditResourceType, recordAudit } from '@/lib/audit/log'
 import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { archiveSpexTemplateSource, syncSpexTemplateSource } from '@/lib/spex/control-plane'
+import { getWorkflowSetupStatusFromState } from '@/lib/spex/workflow-setup'
 import { canAccessTemplate } from '@/lib/templates/permissions'
 import {
   extractRequiredCredentials,
@@ -22,6 +23,7 @@ export const revalidate = 0
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const requestId = generateRequestId()
   const { id } = await params
+  let ownerSetupStatus: 'ready' | 'needs_setup' | undefined
 
   try {
     const session = await getSession()
@@ -110,6 +112,7 @@ const updateTemplateSchema = z.object({
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const requestId = generateRequestId()
   const { id } = await params
+  let ownerSetupStatus: 'ready' | 'needs_setup' | undefined
 
   try {
     const session = await getSession()
@@ -225,6 +228,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         const requiredCredentials = extractRequiredCredentials(currentState)
+        ownerSetupStatus = getWorkflowSetupStatusFromState(currentState)
 
         const sanitizedState = sanitizeCredentials(currentState)
 
@@ -257,6 +261,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           (template.details as { tagline?: string } | null)?.tagline ??
           null,
         requiredSetup: updateData.requiredCredentials ?? template.requiredCredentials ?? [],
+        ownerSetupStatus,
         visibility,
         bumpVersion: true,
       })

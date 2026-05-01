@@ -8,6 +8,7 @@ import { generateRequestId } from '@/lib/core/utils/request'
 import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { generateId } from '@/lib/core/utils/uuid'
 import { syncSpexTemplateInstall } from '@/lib/spex/control-plane'
+import { getWorkflowSetupStatusForWorkflowId } from '@/lib/spex/workflow-setup'
 import { canAccessTemplate, verifyTemplateOwnership } from '@/lib/templates/permissions'
 import {
   type RegenerateStateInput,
@@ -25,20 +26,6 @@ export const revalidate = 0
 interface TemplateDetails {
   tagline?: string
   about?: string
-}
-
-function resolveSetupStatus(requiredCredentials: unknown): 'ready' | 'needs_setup' {
-  if (Array.isArray(requiredCredentials)) {
-    return requiredCredentials.length > 0 ? 'needs_setup' : 'ready'
-  }
-
-  if (requiredCredentials && typeof requiredCredentials === 'object') {
-    return Object.keys(requiredCredentials as Record<string, unknown>).length > 0
-      ? 'needs_setup'
-      : 'ready'
-  }
-
-  return 'ready'
 }
 
 // POST /api/templates/[id]/use - Use a template (increment views and create workflow)
@@ -231,13 +218,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // Silently fail
     }
 
+    const setupStatus = await getWorkflowSetupStatusForWorkflowId(newWorkflowId)
+
     const spexInstallSync = await syncSpexTemplateInstall({
       simUserId: session.user.id,
       simTemplateId: id,
       simWorkflowId: newWorkflowId,
       simWorkspaceId: workspaceId,
       requiredSetup: templateData.requiredCredentials ?? [],
-      setupStatus: resolveSetupStatus(templateData.requiredCredentials),
+      setupStatus,
       enabled: false,
     })
 

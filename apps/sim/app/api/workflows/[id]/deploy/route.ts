@@ -3,6 +3,8 @@ import { createLogger } from '@sim/logger'
 import { eq } from 'drizzle-orm'
 import type { NextRequest } from 'next/server'
 import { generateRequestId } from '@/lib/core/utils/request'
+import { syncSpexInstalledWorkflowStatus } from '@/lib/spex/control-plane'
+import { getWorkflowSetupStatusForWorkflowId } from '@/lib/spex/workflow-setup'
 import { captureServerEvent } from '@/lib/posthog/server'
 import { performFullDeploy, performFullUndeploy } from '@/lib/workflows/orchestration'
 import { validateWorkflowPermissions } from '@/lib/workflows/utils'
@@ -110,6 +112,32 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const responseApiKeyInfo = workflowData!.workspaceId
       ? 'Workspace API keys'
       : 'Personal API keys'
+
+    const workflowOwnerUserId =
+      typeof workflowData?.userId === 'string' && workflowData.userId.trim().length > 0
+        ? workflowData.userId
+        : null
+
+    if (!workflowOwnerUserId) {
+      logger.warn(`[${requestId}] Skipping Spex installed workflow status sync for ${id}`, {
+        reason: 'missing_workflow_owner_user_id',
+      })
+    } else {
+      try {
+        const setupStatus = await getWorkflowSetupStatusForWorkflowId(id)
+        await syncSpexInstalledWorkflowStatus({
+          simUserId: workflowOwnerUserId,
+          simWorkflowId: id,
+          simWorkspaceId:
+            typeof workflowData?.workspaceId === 'string' ? workflowData.workspaceId : null,
+          setupStatus,
+        })
+      } catch (syncError) {
+        logger.warn(`[${requestId}] Failed to sync Spex installed workflow status for ${id}`, {
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        })
+      }
+    }
 
     return createSuccessResponse({
       apiKey: responseApiKeyInfo,

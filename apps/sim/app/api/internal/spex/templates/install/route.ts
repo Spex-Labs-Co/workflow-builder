@@ -11,6 +11,7 @@ import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { generateId } from '@/lib/core/utils/uuid'
 import { syncSpexTemplateInstall } from '@/lib/spex/control-plane'
 import { buildDeterministicPassword } from '@/lib/spex/email-login'
+import { getWorkflowSetupStatusForWorkflowId } from '@/lib/spex/workflow-setup'
 import type { RegenerateStateInput } from '@/lib/workflows/persistence/utils'
 import { regenerateWorkflowStateIds } from '@/lib/workflows/persistence/utils'
 import { deduplicateWorkflowName } from '@/lib/workflows/utils'
@@ -25,20 +26,6 @@ const InstallTemplateSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
 })
-
-function normalizeSetupStatus(requiredCredentials: unknown): 'ready' | 'needs_setup' {
-  if (Array.isArray(requiredCredentials)) {
-    return requiredCredentials.length > 0 ? 'needs_setup' : 'ready'
-  }
-
-  if (requiredCredentials && typeof requiredCredentials === 'object') {
-    return Object.keys(requiredCredentials as Record<string, unknown>).length > 0
-      ? 'needs_setup'
-      : 'ready'
-  }
-
-  return 'ready'
-}
 
 function remapTemplateVariables(
   templateState: { variables?: Record<string, unknown> } | null | undefined,
@@ -301,7 +288,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const setupStatus = normalizeSetupStatus(template.requiredCredentials)
+    const setupStatus = await getWorkflowSetupStatusForWorkflowId(newWorkflowId)
     const enabled = setupStatus === 'ready'
 
     await syncSpexTemplateInstall({

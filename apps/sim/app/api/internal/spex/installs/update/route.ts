@@ -8,6 +8,7 @@ import { generateInternalToken } from '@/lib/auth/internal'
 import { checkInternalApiKey } from '@/lib/copilot/utils'
 import { getInternalApiBaseUrl } from '@/lib/core/utils/urls'
 import { generateId } from '@/lib/core/utils/uuid'
+import { getWorkflowSetupStatusForWorkflowId } from '@/lib/spex/workflow-setup'
 import type { RegenerateStateInput } from '@/lib/workflows/persistence/utils'
 import { regenerateWorkflowStateIds } from '@/lib/workflows/persistence/utils'
 
@@ -24,20 +25,6 @@ const UpdateInstallSchema = z.object({
   simWorkflowId: z.string().min(1),
   simTemplateId: z.string().min(1),
 })
-
-function normalizeSetupStatus(requiredCredentials: unknown): 'ready' | 'needs_setup' {
-  if (Array.isArray(requiredCredentials)) {
-    return requiredCredentials.length > 0 ? 'needs_setup' : 'ready'
-  }
-
-  if (requiredCredentials && typeof requiredCredentials === 'object') {
-    return Object.keys(requiredCredentials as Record<string, unknown>).length > 0
-      ? 'needs_setup'
-      : 'ready'
-  }
-
-  return 'ready'
-}
 
 function remapTemplateVariables(
   templateState: { variables?: Record<string, unknown> } | null | undefined,
@@ -206,9 +193,11 @@ export async function POST(request: NextRequest) {
       })
       .where(eq(workflow.id, simWorkflowId))
 
+    const setupStatus = await getWorkflowSetupStatusForWorkflowId(simWorkflowId)
+
     return NextResponse.json({
       success: true,
-      setupStatus: normalizeSetupStatus(template.requiredCredentials),
+      setupStatus,
       requiredSetup: template.requiredCredentials ?? [],
     })
   } catch (error) {

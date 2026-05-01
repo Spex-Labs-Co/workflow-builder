@@ -15,6 +15,7 @@ import { getSession } from '@/lib/auth'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { generateId } from '@/lib/core/utils/uuid'
 import { syncSpexTemplateSource } from '@/lib/spex/control-plane'
+import { getWorkflowSetupStatusFromState } from '@/lib/spex/workflow-setup'
 import { canAccessTemplate, verifyEffectiveSuperUser } from '@/lib/templates/permissions'
 import {
   extractRequiredCredentials,
@@ -316,6 +317,7 @@ export async function POST(request: NextRequest) {
 
     // Extract credential requirements before sanitizing
     const requiredCredentials = extractRequiredCredentials(stateWithVariables)
+    const ownerSetupStatus = getWorkflowSetupStatusFromState(stateWithVariables)
 
     // Sanitize the workflow state to remove all credential values
     const sanitizedState = sanitizeWorkflowState(stateWithVariables)
@@ -346,6 +348,7 @@ export async function POST(request: NextRequest) {
       name: data.name,
       description: data.details?.tagline || null,
       requiredSetup: requiredCredentials,
+      ownerSetupStatus,
       visibility: data.visibility,
       bumpVersion: false,
       ownerEnabled: false,

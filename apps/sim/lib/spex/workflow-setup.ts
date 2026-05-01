@@ -10,6 +10,8 @@ import {
 } from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks/registry'
 import { AuthMode, type SubBlockConfig } from '@/blocks/types'
+import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
+import type { WorkflowState } from '@/stores/workflows/workflow/types'
 
 type WorkflowBlockRecord = {
   id: string
@@ -88,4 +90,23 @@ export function getWorkflowSetupStatusFromBlocks(
   }
 
   return 'ready'
+}
+
+export function getWorkflowSetupStatusFromState(
+  state: Partial<WorkflowState> | null | undefined
+): 'ready' | 'needs_setup' {
+  const blocks = Object.values(state?.blocks || {}) as WorkflowBlockRecord[]
+  return getWorkflowSetupStatusFromBlocks(blocks)
+}
+
+export async function getWorkflowSetupStatusForWorkflowId(
+  workflowId: string
+): Promise<'ready' | 'needs_setup'> {
+  const normalizedData = await loadWorkflowFromNormalizedTables(workflowId)
+  if (!normalizedData) {
+    throw new Error(`Workflow ${workflowId} not found`)
+  }
+
+  const blocks = Object.values(normalizedData.blocks || {}) as WorkflowBlockRecord[]
+  return getWorkflowSetupStatusFromBlocks(blocks)
 }

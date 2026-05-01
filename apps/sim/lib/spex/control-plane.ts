@@ -99,6 +99,7 @@ export async function syncSpexTemplateSource(params: {
   name: string
   description?: string | null
   requiredSetup?: unknown
+  ownerSetupStatus?: 'ready' | 'needs_setup'
   visibility?: 'private' | 'public'
   bumpVersion?: boolean
   ownerEnabled?: boolean
@@ -120,6 +121,7 @@ export async function syncSpexTemplateSource(params: {
       name: params.name,
       description: params.description ?? null,
       requiredSetup: params.requiredSetup ?? [],
+      ownerSetupStatus: params.ownerSetupStatus,
       bumpVersion: Boolean(params.bumpVersion),
     }
 
@@ -187,6 +189,67 @@ export async function syncSpexTemplateInstall(params: {
       error: error instanceof Error ? error.message : String(error),
     })
     return { attempted: true, synced: false, reason: 'install-sync-failed' }
+  }
+}
+
+export async function syncSpexInstalledWorkflowStatus(params: {
+  simUserId: string
+  simWorkflowId: string
+  simWorkspaceId?: string | null
+  setupStatus: 'ready' | 'needs_setup'
+}): Promise<SpexSyncResult> {
+  if (!isConfigured()) {
+    return { attempted: false, synced: false, reason: 'control-plane-not-configured' }
+  }
+
+  const spexUserId = await getSpexUserIdForSimUser(params.simUserId)
+  if (!spexUserId) {
+    return { attempted: false, synced: false, reason: 'no-spex-identity-link' }
+  }
+
+  try {
+    if (!env.SPEX_API_BASE_URL || !env.SPEX_INTERNAL_API_KEY) {
+      return { attempted: false, synced: false, reason: 'control-plane-not-configured' }
+    }
+
+    const response = await fetch(
+      `${env.SPEX_API_BASE_URL.replace(/\/$/, '')}/sim/internal/installs/by-workflow`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-API-Key': env.SPEX_INTERNAL_API_KEY,
+        },
+        body: JSON.stringify({
+          spexUserId,
+          simInstallerUserId: params.simUserId,
+          simWorkflowId: params.simWorkflowId,
+          simWorkspaceId: params.simWorkspaceId ?? null,
+          setupStatus: params.setupStatus,
+        }),
+        cache: 'no-store',
+      }
+    )
+
+    if (response.status === 404) {
+      return { attempted: true, synced: false, reason: 'no-install-record' }
+    }
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Spex control plane request failed: ${response.status} ${text}`)
+    }
+
+    await response.json()
+
+    return { attempted: true, synced: true }
+  } catch (error) {
+    logger.error('Failed to sync Spex installed workflow status', {
+      simUserId: params.simUserId,
+      simWorkflowId: params.simWorkflowId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { attempted: true, synced: false, reason: 'installed-status-sync-failed' }
   }
 }
 
