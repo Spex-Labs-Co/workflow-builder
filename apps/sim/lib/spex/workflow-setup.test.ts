@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
 import { getBlock } from '@/blocks/registry'
 import { AuthMode } from '@/blocks/types'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
 import {
   getWorkflowSetupStatusForWorkflowId,
   getWorkflowSetupStatusFromBlocks,
@@ -125,7 +125,9 @@ describe('getWorkflowSetupStatusFromBlocks', () => {
     ;(getBlock as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(
       BROWSER_USE_BLOCK_CONFIG as any
     )
-    ;(loadWorkflowFromNormalizedTables as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    ;(
+      loadWorkflowFromNormalizedTables as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce({
       blocks: {
         'block-1': {
           id: 'block-1',
@@ -146,9 +148,9 @@ describe('getWorkflowSetupStatusFromBlocks', () => {
   })
 
   it('throws when workflow id cannot be resolved', async () => {
-    ;(loadWorkflowFromNormalizedTables as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      null
-    )
+    ;(
+      loadWorkflowFromNormalizedTables as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce(null)
 
     await expect(getWorkflowSetupStatusForWorkflowId('missing-workflow')).rejects.toThrow(
       'Workflow missing-workflow not found'

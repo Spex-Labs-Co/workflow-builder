@@ -1,3 +1,4 @@
+import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
 import {
   buildCanonicalIndex,
   buildSubBlockValues,
@@ -10,7 +11,6 @@ import {
 } from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks/registry'
 import { AuthMode, type SubBlockConfig } from '@/blocks/types'
-import { loadWorkflowFromNormalizedTables } from '@/lib/workflows/persistence/utils'
 import type { WorkflowState } from '@/stores/workflows/workflow/types'
 
 type WorkflowBlockRecord = {
