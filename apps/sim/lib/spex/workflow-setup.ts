@@ -5,6 +5,7 @@ import {
   hasAdvancedValues,
   isSubBlockFeatureEnabled,
   isSubBlockVisibleForMode,
+  type CanonicalModeOverrides,
   type SubBlockCondition,
 } from '@/lib/workflows/subblocks/visibility'
 import { getBlock } from '@/blocks/registry'
@@ -38,7 +39,7 @@ function isSubBlockVisible(block: WorkflowBlockRecord, subBlockConfig: SubBlockC
   const canonicalIndex = buildCanonicalIndex(blockSubBlocks)
   const effectiveAdvanced =
     (block.advancedMode ?? false) || hasAdvancedValues(blockSubBlocks, values, canonicalIndex)
-  const canonicalModeOverrides = block.data?.canonicalModes
+  const canonicalModeOverrides = block.data?.canonicalModes as CanonicalModeOverrides | undefined
 
   if (subBlockConfig.mode === 'trigger' && !block.triggerMode) return false
   if (block.triggerMode && subBlockConfig.mode && subBlockConfig.mode !== 'trigger') return false
